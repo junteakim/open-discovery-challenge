@@ -3,6 +3,7 @@
 from discovery.search.families import FamilyScheduler, default_families
 from discovery.search.evolution import EvolutionEngine
 from discovery.config import Config
+from discovery.gates.runner import GateRunner
 from pathlib import Path
 import tempfile
 
@@ -31,3 +32,29 @@ def test_families_generate_distinct_names():
     families = default_families()
     names = {f.name for f in families}
     assert len(names) == len(families)
+
+
+def test_families_produce_competitive_mw():
+    """Families should produce at least one gate-passed seed with MW ≥ 400."""
+    from discovery.scoring.prior import compute_mw
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        cfg = Config.from_env(Path(tmp))
+        runner = GateRunner(cfg)
+        
+        families = default_families()
+        found_competitive = False
+        
+        for family in families:
+            for smiles in family.enumerate(limit=20):
+                gate = runner.check(smiles)
+                if gate.passed and gate.canonical_smiles:
+                    mw = compute_mw(gate.canonical_smiles)
+                    if mw and mw >= 400:
+                        found_competitive = True
+                        break
+            if found_competitive:
+                break
+        
+        assert found_competitive, "No family produced a gate-passed seed with MW ≥ 400"
+
