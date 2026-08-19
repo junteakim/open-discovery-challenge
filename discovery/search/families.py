@@ -45,10 +45,14 @@ class ScaffoldFamily:
 
 
 # Substituent pools (fragments attach at attachment points in templates)
-_AMIDES = ["C(=O)N", "C(=O)NC", "C(=O)NCC", "C(=O)N(C)C"]
-_AROMATIC = ["c1ccccc1", "c1ccc(F)cc1", "c1ccc(OC)cc1", "c1ccncc1"]
-_ALIPHATIC = ["C", "CC", "C(C)C", "CCO", "CCN"]
-_HETEROCYCLES = ["c1ncccc1", "c1ccoc1", "c1cscn1", "c1cncnc1"]
+# Target MW 500-550 competitive band (season 1 median 67.6, only band with median >60)
+# Live 2026-08-19 leaderboard: 450-500 median 42.6, 500-550 median 67.6
+_AMIDES = ["C(=O)NCCC", "C(=O)NC(C)C", "C(=O)NCCOC", "C(=O)N(CC)CC", "C(=O)NCCc1ccccc1"]
+_AROMATIC = ["c1ccc(OC)cc1", "c1ccc(C(F)(F)F)cc1", "c1ccc(Cl)c(OC)c1", "c1ccc2ccccc2c1", "c1ccc(OCc2ccccc2)cc1"]
+_ALIPHATIC = ["CCC", "CC(C)C", "CCOC", "CC(C)CC", "CCCN", "CCOc1ccccc1"]
+_HETEROCYCLES = ["c1ncc(C)cn1", "c1ccc(C)nc1", "c1cc(OC)ccn1", "c1ccc2occc2c1", "c1cc(Cl)ccn1"]
+_LINKERS = ["CC(=O)", "CCN(C)C", "CCOC", "C(=O)NCC", "CCOc1ccccc1"]
+_BIARYL = ["c1ccc(c1)c1ccccc1", "c1ccc(c1)c1ccc(OC)cc1", "c1ccc(c1)c1ccc(F)cc1"]
 
 
 def default_families() -> list[ScaffoldFamily]:
@@ -56,34 +60,34 @@ def default_families() -> list[ScaffoldFamily]:
         ScaffoldFamily(
             name="benzimidazole_amide",
             template="c1ccc2[nH]c({R1})nc2c1{R2}",
-            r_groups={"R1": _AMIDES, "R2": _AROMATIC[:3]},
+            r_groups={"R1": _AMIDES, "R2": _AROMATIC + _BIARYL},
         ),
         ScaffoldFamily(
             name="quinazoline_urea",
             template="c1ccc2c(c1)nc({R1})nc2{R2}",
-            r_groups={"R1": ["NC(=O)N", "NC(=O)NC", "NC(=O)NCC"], "R2": _HETEROCYCLES[:3]},
+            r_groups={"R1": ["NC(=O)NCC", "NC(=O)NCCC", "NC(=O)NC(C)C", "NC(=O)NCCc1ccccc1"], "R2": _HETEROCYCLES + _AROMATIC},
         ),
         ScaffoldFamily(
             name="pyrimidine_sulfonamide",
             template="c1nc({R1})nc({R2})c1{S}",
             r_groups={
-                "R1": _ALIPHATIC[:3],
-                "R2": _AROMATIC[:2],
-                "S": ["S(=O)(=O)N", "S(=O)(=O)NC"],
+                "R1": _ALIPHATIC + ["c1ccccc1"],
+                "R2": _AROMATIC[:3],
+                "S": ["S(=O)(=O)NCC", "S(=O)(=O)NCCC", "S(=O)(=O)NCc1ccccc1"],
             },
         ),
         ScaffoldFamily(
             name="indole_carboxamide",
             template="c1ccc2[nH]c({R1})cc2c1{R2}",
-            r_groups={"R1": _AMIDES[:3], "R2": _ALIPHATIC[:3]},
+            r_groups={"R1": _AMIDES, "R2": _AROMATIC + _BIARYL},
         ),
         ScaffoldFamily(
             name="triazine_aniline",
             template="c1nc({R1})nc({R2})n1{R3}",
             r_groups={
-                "R1": ["N", "Nc1ccccc1"],
-                "R2": _HETEROCYCLES[:2],
-                "R3": ["C(=O)N", "C(=O)NC"],
+                "R1": ["Nc1ccc(OC)cc1", "Nc1ccc(Cl)cc1", "Nc1ccc(C)cc1"],
+                "R2": _HETEROCYCLES[:3] + _AROMATIC[:2],
+                "R3": _LINKERS[:3],
             },
         ),
     ]

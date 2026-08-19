@@ -16,6 +16,7 @@ from discovery.providers.finalbench import FinalBenchClient, FinalBenchProvider
 from discovery.providers.replay import ReplayProvider
 from discovery.providers.stub import StubProvider
 from discovery.scoring import passes_cutoff, rank_candidates
+from discovery.scoring.prior import predict_prior
 from discovery.search.evolution import EvolutionEngine
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -138,9 +139,11 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
     # Pre-submit cutoff using replay cache if available
     replay = ReplayProvider(cfg.paths.feedback)
+    cached_score = None
     if replay.available():
         try:
             cached = replay.score(smiles)
+            cached_score = cached.effective_score()
             if not passes_cutoff(cached):
                 logger.error(
                     "Rejected: effective score %.2f <= 60",
@@ -150,8 +153,24 @@ def cmd_submit(args: argparse.Namespace) -> int:
         except ProviderError:
             pass
 
+    # MW-band prior check — block submission if prior lower_bound ≤ 60
+    # This runs even when no replay cache exists
+    prior = predict_prior(smiles)
+    if prior.lower_bound <= 60.0:
+        logger.error(
+            "Rejected by MW-band prior: band=%s mw=%.1f prior_lower_bound=%.1f cutoff=60.0",
+            prior.mw_band,
+            prior.mw,
+            prior.lower_bound,
+        )
+        logger.error("Reason: %s", prior.reason)
+        return 4
+
     if args.dry_run:
         logger.info("Dry run OK: would submit %s", smiles)
+        logger.info("MW-band prior: band=%s mw=%.1f lower_bound=%.1f", prior.mw_band, prior.mw, prior.lower_bound)
+        if cached_score is not None:
+            logger.info("Replay cache: effective_score=%.1f", cached_score)
         return 0
 
     try:
