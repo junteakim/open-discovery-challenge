@@ -6,7 +6,7 @@
 
 ## Rules enforced / 적용 규칙
 
-0. Effective score ≤ 60 → auto-excluded (uses lower bound when uncertainty exists); **submit blocked without MW-band prior >60**
+0. Effective score ≤ 60 → auto-excluded (uses lower bound when uncertainty exists); **submit blocked by MW-band prior: only 500-550 band (median 67.6) passes**
 1. Gates before scoring: PAINS, covalent warheads, MW cap, mutagenicity alerts, insolubility, duplicates, invalid structures
 2. Optimize 70-pt core first (activity → binding → selectivity)
 3. Scaffold hop — reject close analogues of known antimalarials (e.g. DSM265)
@@ -16,7 +16,7 @@
 7. Mutate worst-scoring axis only
 8. Parallel populations per scaffold family (round-robin)
 
-**Note:** Computational predictions ≠ wet-lab validation. MW-band prior is a local filter based on season-1 leaderboard statistics, not an official GPU score.
+**Note:** Computational predictions ≠ wet-lab validation. MW-band prior uses **median** from live 2026-08-19 leaderboard (honest, conservative). 450-500 band median is 42.6 (rejected), 500-550 band median is 67.6 (accepted). This is a **local filter**, not an official GPU score.
 
 ## Setup
 

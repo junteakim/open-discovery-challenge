@@ -12,14 +12,18 @@ except ImportError:  # pragma: no cover
     Descriptors = None
 
 
-# Season 1 official leaderboard observations:
-# MW ≤300 has NEVER scored >60 (band max 41.4)
-# MW 450-550 concentrates scores >60 (500-550 median 67.6)
+# Season 1 official leaderboard stats (2026-08-19)
+# Live official totals by MW band: n, median, p10, max, count>60
+# Source: /api/leaderboard?season=1
 MW_BAND_STATS = {
-    "0-300": {"max_observed": 41.4, "has_over_60": False},
-    "300-450": {"max_observed": 58.0, "has_over_60": False},
-    "450-500": {"max_observed": 68.0, "has_over_60": True, "p10": 61.5},
-    "500-550": {"max_observed": 72.0, "has_over_60": True, "p10": 63.0},
+    "150-200": {"n": 8, "median": 2.1, "p10": 1.7, "max": 2.5, "gt60": 0},
+    "200-250": {"n": 52, "median": 2.8, "p10": 1.9, "max": 16.8, "gt60": 0},
+    "250-300": {"n": 100, "median": 7.3, "p10": 3.4, "max": 41.4, "gt60": 0},
+    "300-350": {"n": 368, "median": 18.0, "p10": 5.3, "max": 71.5, "gt60": 5},
+    "350-400": {"n": 648, "median": 36.2, "p10": 11.6, "max": 69.6, "gt60": 45},
+    "400-450": {"n": 476, "median": 44.8, "p10": 16.6, "max": 73.8, "gt60": 71},
+    "450-500": {"n": 304, "median": 42.6, "p10": 18.2, "max": 79.6, "gt60": 64},
+    "500-550": {"n": 165, "median": 67.6, "p10": 25.7, "max": 84.6, "gt60": 103},
 }
 
 
@@ -46,10 +50,20 @@ def compute_mw(smiles: str) -> float | None:
 
 def get_mw_band(mw: float) -> str:
     """Classify MW into historical band."""
-    if mw < 300:
-        return "0-300"
+    if mw < 150:
+        return "<150"
+    elif mw < 200:
+        return "150-200"
+    elif mw < 250:
+        return "200-250"
+    elif mw < 300:
+        return "250-300"
+    elif mw < 350:
+        return "300-350"
+    elif mw < 400:
+        return "350-400"
     elif mw < 450:
-        return "300-450"
+        return "400-450"
     elif mw < 500:
         return "450-500"
     elif mw <= 550:
@@ -62,9 +76,10 @@ def predict_prior(smiles: str, leaderboard_stats: dict | None = None) -> PriorRe
     """
     Return local prior prediction based on MW band and optional live leaderboard stats.
     
-    Conservative policy:
-    - If the candidate's MW band has 0 official entries >60, lower_bound = historical max (or 0)
-    - If the band has entries >60, lower_bound = cautious percentile (p10)
+    Honest, conservative policy (2026-08-19 live leaderboard):
+    - lower_bound = band median (not p10, not invented values)
+    - Only bands with median >60 can pass the ≤60 cutoff
+    - As of 2026-08-19, only 500-550 band has median >60 (67.6)
     - NEVER invent an official GPU score — this is a LOCAL PRIOR only
     
     Args:
@@ -90,38 +105,30 @@ def predict_prior(smiles: str, leaderboard_stats: dict | None = None) -> PriorRe
     stats = MW_BAND_STATS.get(band)
     
     if stats is None:
-        # Band >550 — no historical data, pessimistic default
+        # Band with no historical data (<150 or >550) — pessimistic default
         return PriorResult(
             smiles=smiles,
             mw=mw,
             mw_band=band,
-            predicted_total=40.0,
+            predicted_total=30.0,
             lower_bound=30.0,
             reason=f"mw_band={band} has no historical data, pessimistic default",
         )
     
-    if not stats["has_over_60"]:
-        # Band has NEVER scored >60 — use historical max as both prediction and lower bound
-        max_obs = stats["max_observed"]
-        return PriorResult(
-            smiles=smiles,
-            mw=mw,
-            mw_band=band,
-            predicted_total=max_obs,
-            lower_bound=max_obs,
-            reason=f"mw_band={band} has NEVER scored >60 (historical max {max_obs:.1f})",
-        )
+    # Use median as conservative lower_bound
+    # Predicted total = midpoint between median and max
+    median = stats["median"]
+    max_obs = stats["max"]
+    n = stats["n"]
+    gt60 = stats["gt60"]
     
-    # Band has entries >60 — use p10 as conservative lower bound
-    p10 = stats.get("p10", stats["max_observed"] * 0.85)
-    max_obs = stats["max_observed"]
-    predicted = (p10 + max_obs) / 2  # midpoint estimate
+    predicted = (median + max_obs) / 2
     
     return PriorResult(
         smiles=smiles,
         mw=mw,
         mw_band=band,
         predicted_total=predicted,
-        lower_bound=p10,
-        reason=f"mw_band={band} has entries >60 (p10={p10:.1f})",
+        lower_bound=median,
+        reason=f"mw_band={band} n={n} median={median:.1f} max={max_obs:.1f} (gt60={gt60})",
     )

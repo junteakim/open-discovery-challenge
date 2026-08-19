@@ -45,7 +45,8 @@ class ScaffoldFamily:
 
 
 # Substituent pools (fragments attach at attachment points in templates)
-# Updated to target MW 450-550 competitive band (season 1 median 67.6 in 500-550 band)
+# Target MW 500-550 competitive band (season 1 median 67.6, only band with median >60)
+# Live 2026-08-19 leaderboard: 450-500 median 42.6, 500-550 median 67.6
 _AMIDES = ["C(=O)NCCC", "C(=O)NC(C)C", "C(=O)NCCOC", "C(=O)N(CC)CC", "C(=O)NCCc1ccccc1"]
 _AROMATIC = ["c1ccc(OC)cc1", "c1ccc(C(F)(F)F)cc1", "c1ccc(Cl)c(OC)c1", "c1ccc2ccccc2c1", "c1ccc(OCc2ccccc2)cc1"]
 _ALIPHATIC = ["CCC", "CC(C)C", "CCOC", "CC(C)CC", "CCCN", "CCOc1ccccc1"]
