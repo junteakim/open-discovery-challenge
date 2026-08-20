@@ -163,8 +163,8 @@ def should_submit(
     
     # Check docking (if available)
     dock_result = dock_molecule(canonical)
-    dock_available = dock_result["available"]
-    dock_affinity = dock_result.get("affinity")
+    dock_status = dock_result.get("status", "unavailable")
+    dock_affinity = dock_result.get("kcal")
     
     # Estimate binding potential (rough heuristic, not actual docking)
     binding_estimate = estimate_binding_potential(canonical)
@@ -200,16 +200,19 @@ def should_submit(
         holds.append(f"pharmacophore_fail:{pharma_result['reason']}")
     
     # Docking or binding estimate (+20 max)
-    if dock_available and dock_affinity is not None:
+    if dock_status == "success" and dock_affinity is not None:
         # More negative affinity = better
         # Scale: -10 kcal/mol → +20 pts, 0 kcal/mol → 0 pts
         affinity_score = max(0, min(20, -dock_affinity * 2))
         local_rank += affinity_score
-        passes.append(f"docking_affinity:{dock_affinity:.1f}kcal/mol")
+        passes.append(f"docking_5tbo:{dock_affinity:.1f}kcal/mol")
     else:
-        # Use binding estimate (0-20)
+        # Use binding estimate (0-20) when docking unavailable
         local_rank += binding_estimate
-        passes.append(f"binding_estimate:{binding_estimate:.1f}/20")
+        if dock_status != "success":
+            passes.append(f"docking_unavailable:fallback_estimate:{binding_estimate:.1f}/20")
+        else:
+            passes.append(f"binding_estimate:{binding_estimate:.1f}/20")
     
     # Empirical prior (scaled to max +20, but only if positive)
     if empirical_p > 0:

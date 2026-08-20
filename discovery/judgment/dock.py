@@ -1,12 +1,24 @@
-"""Docking hook for PfDHODH (LOCAL scores only, not official GPU).
+"""AutoDock Vina docking wrapper for PfDHODH (LOCAL scores only).
 
-If vina/smina is available, dock generated conformers.
-If not available, return unavailable (do NOT fake kcal scores).
+Uses PDB 5TBO (DSM265 binding site) with meeko-prepared receptor.
+Returns LOCAL kcal/mol scores - NOT official GPU scores.
+
+Box parameters (78Z/DSM421 centroid in 5TBO):
+- Center: (23.498, -17.282, -15.054)
+- Size: 24 Å cubic
+
+Environment variables:
+- ODC_VINA: path to vina binary (default: /workspace/bin/vina)
+- ODC_RECEPTOR: path to receptor PDBQT (required for docking)
+
+If vina or receptor missing, returns status=unavailable (does NOT fake kcal).
 """
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -18,69 +30,294 @@ except ImportError:  # pragma: no cover
     AllChem = None
 
 
-def check_docking_available() -> tuple[bool, str | None]:
+# Vina box parameters for PfDHODH 5TBO
+VINA_BOX = {
+    "center_x": 23.498,
+    "center_y": -17.282,
+    "center_z": -15.054,
+    "size_x": 24,
+    "size_y": 24,
+    "size_z": 24,
+}
+
+
+def check_vina_available() -> tuple[bool, Path | None, str]:
     """
-    Check if docking software is available.
+    Check if Vina binary and receptor are available.
     
     Returns:
-        (available, path_or_reason)
+        (available, vina_path, reason)
     """
-    # Check for vina
-    vina_path = shutil.which("vina")
-    if vina_path:
-        return True, vina_path
+    # Check for vina binary
+    vina_path = os.environ.get("ODC_VINA")
+    if vina_path and Path(vina_path).exists():
+        vina_bin = Path(vina_path)
+    else:
+        # Try default location
+        default_vina = Path("/workspace/bin/vina")
+        if default_vina.exists():
+            vina_bin = default_vina
+        else:
+            # Try system PATH
+            which_vina = shutil.which("vina")
+            if which_vina:
+                vina_bin = Path(which_vina)
+            else:
+                return False, None, "vina_binary_not_found"
     
-    # Check for smina
-    smina_path = shutil.which("smina")
-    if smina_path:
-        return True, smina_path
+    # Check for receptor
+    receptor_path = os.environ.get("ODC_RECEPTOR")
+    if not receptor_path or not Path(receptor_path).exists():
+        return False, None, "receptor_pdbqt_not_found_set_ODC_RECEPTOR"
     
-    return False, "no_vina_or_smina_in_path"
+    return True, vina_bin, "available"
 
 
-def dock_molecule(
-    smiles: str,
-    receptor_pdbqt: Path | None = None,
+def smiles_to_pdbqt(smiles: str, output_path: Path) -> bool:
+    """
+    Convert SMILES to ligand PDBQT using RDKit + meeko.
+    
+    Args:
+        smiles: Input SMILES
+        output_path: Where to write PDBQT
+    
+    Returns:
+        Success bool
+    """
+    if Chem is None:
+        return False
+    
+    try:
+        # Parse SMILES
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return False
+        
+        # Add hydrogens
+        mol = Chem.AddHs(mol)
+        
+        # Generate 3D conformation (ETKDG)
+        params = AllChem.ETKDGv3()
+        params.randomSeed = 42
+        result = AllChem.EmbedMolecule(mol, params)
+        if result != 0:
+            # Try without ETKDG
+            result = AllChem.EmbedMolecule(mol)
+            if result != 0:
+                return False
+        
+        # Optimize with UFF
+        AllChem.UFFOptimizeMolecule(mol)
+        
+        # Convert to PDBQT using meeko
+        try:
+            from meeko import MoleculePreparation, PDBQTWriterLegacy
+        except ImportError:
+            # If meeko not available, try RDKit's PDB writer + manual PDBQT conversion
+            # (less reliable, but better than nothing)
+            return False
+        
+        # Prepare molecule
+        preparator = MoleculePreparation()
+        preparator.prepare(mol)
+        
+        # Write PDBQT
+        writer = PDBQTWriterLegacy()
+        pdbqt_string = writer.write_string(preparator.setup)
+        
+        output_path.write_text(pdbqt_string)
+        return True
+    
+    except Exception:
+        return False
+
+
+def run_vina_docking(
+    ligand_pdbqt: Path,
+    receptor_pdbqt: Path,
+    vina_bin: Path,
+    output_dir: Path,
 ) -> dict[str, any]:
     """
-    Dock molecule into PfDHODH pocket if docking software available.
+    Run AutoDock Vina docking.
+    
+    Returns:
+        Dict with status, kcal, poses, etc.
+    """
+    output_pdbqt = output_dir / "output.pdbqt"
+    log_file = output_dir / "vina.log"
+    
+    # Build vina command
+    cmd = [
+        str(vina_bin),
+        "--receptor", str(receptor_pdbqt),
+        "--ligand", str(ligand_pdbqt),
+        "--out", str(output_pdbqt),
+        "--center_x", str(VINA_BOX["center_x"]),
+        "--center_y", str(VINA_BOX["center_y"]),
+        "--center_z", str(VINA_BOX["center_z"]),
+        "--size_x", str(VINA_BOX["size_x"]),
+        "--size_y", str(VINA_BOX["size_y"]),
+        "--size_z", str(VINA_BOX["size_z"]),
+        "--exhaustiveness", "8",
+        "--cpu", "1",
+    ]
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+        )
+        
+        log_file.write_text(result.stdout + "\n" + result.stderr)
+        
+        if result.returncode != 0:
+            return {
+                "status": "vina_failed",
+                "kcal": None,
+                "reason": f"vina_exit_code_{result.returncode}",
+            }
+        
+        # Parse output
+        poses = parse_vina_output(result.stdout)
+        if not poses:
+            return {
+                "status": "vina_no_poses",
+                "kcal": None,
+                "reason": "no_poses_in_output",
+            }
+        
+        # Best pose (first one)
+        best_kcal = poses[0]["affinity"]
+        
+        return {
+            "status": "success",
+            "kcal": best_kcal,
+            "poses": poses,
+            "log": str(log_file),
+        }
+    
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "vina_timeout",
+            "kcal": None,
+            "reason": "docking_timeout_300s",
+        }
+    except Exception as e:
+        return {
+            "status": "vina_error",
+            "kcal": None,
+            "reason": str(e),
+        }
+
+
+def parse_vina_output(vina_stdout: str) -> list[dict]:
+    """
+    Parse Vina output table to extract poses and affinities.
+    
+    Returns:
+        List of dicts with mode, affinity, rmsd_lb, rmsd_ub
+    """
+    poses = []
+    in_table = False
+    
+    for line in vina_stdout.split("\n"):
+        line = line.strip()
+        
+        # Look for table header
+        if "mode |" in line and "affinity" in line:
+            in_table = True
+            continue
+        
+        # Parse table rows
+        if in_table and line and not line.startswith("-"):
+            parts = line.split()
+            if len(parts) >= 4:
+                try:
+                    mode = int(parts[0])
+                    affinity = float(parts[1])
+                    rmsd_lb = float(parts[2])
+                    rmsd_ub = float(parts[3])
+                    
+                    poses.append({
+                        "mode": mode,
+                        "affinity": affinity,
+                        "rmsd_lb": rmsd_lb,
+                        "rmsd_ub": rmsd_ub,
+                    })
+                except (ValueError, IndexError):
+                    continue
+        
+        # End of table
+        if in_table and line.startswith("Writing output"):
+            break
+    
+    return poses
+
+
+def dock_molecule(smiles: str) -> dict[str, any]:
+    """
+    Dock molecule into PfDHODH 5TBO pocket.
+    
+    Returns LOCAL docking score (NOT official GPU score).
+    If vina/receptor missing, returns status=unavailable (does NOT fake kcal).
     
     Args:
         smiles: SMILES to dock
-        receptor_pdbqt: Path to prepared receptor PDBQT (optional)
     
     Returns:
         Dict with:
-            - available: bool
-            - affinity: float | None (kcal/mol, more negative = better)
-            - reason: str
-            - source: str (always "local_docking_not_official")
+            - status: str (success, unavailable, failed, etc.)
+            - kcal: float | None (affinity in kcal/mol, more negative = better)
+            - poses: list | None (all poses if available)
+            - receptor: str (5TBO)
+            - source: str (always "local_vina_5tbo")
     """
-    available, binary = check_docking_available()
+    # Check availability
+    available, vina_bin, reason = check_vina_available()
     
     if not available:
         return {
-            "available": False,
-            "affinity": None,
-            "reason": binary or "docking_unavailable",
-            "source": "local_docking_not_official",
+            "status": "unavailable",
+            "kcal": None,
+            "reason": reason,
+            "receptor": "5TBO",
+            "source": "local_vina_5tbo",
         }
     
-    # If we get here, vina/smina exists but we need a prepared receptor
-    # For now, return unavailable since we don't have the receptor prepared
-    # In a full implementation, we would:
-    # 1. Generate 3D conformer from SMILES
-    # 2. Convert to PDBQT
-    # 3. Run vina/smina with prepared receptor
-    # 4. Parse output affinity
+    receptor_path = Path(os.environ["ODC_RECEPTOR"])
     
-    return {
-        "available": False,
-        "affinity": None,
-        "reason": "receptor_not_prepared_implementation_placeholder",
-        "source": "local_docking_not_official",
-        "note": "Docking binary found but receptor prep not implemented",
-    }
+    # Create temp directory for docking
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir)
+        ligand_pdbqt = tmp_path / "ligand.pdbqt"
+        
+        # Convert SMILES to PDBQT
+        success = smiles_to_pdbqt(smiles, ligand_pdbqt)
+        if not success:
+            return {
+                "status": "ligand_prep_failed",
+                "kcal": None,
+                "reason": "smiles_to_pdbqt_failed",
+                "receptor": "5TBO",
+                "source": "local_vina_5tbo",
+            }
+        
+        # Run docking
+        dock_result = run_vina_docking(
+            ligand_pdbqt,
+            receptor_path,
+            vina_bin,
+            tmp_path,
+        )
+        
+        # Add metadata
+        dock_result["receptor"] = "5TBO"
+        dock_result["source"] = "local_vina_5tbo"
+        
+        return dock_result
 
 
 def estimate_binding_potential(smiles: str) -> float:

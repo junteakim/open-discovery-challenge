@@ -81,6 +81,31 @@ There is **no public `/api/score`** — official scoring happens after authentic
 | `CHALLENGE_TOKEN` | Alternative auth token |
 | `FINALBENCH_BASE_URL` | Override API base URL |
 | `FINALBENCH_SEASON` | Season number (default 1) |
+| `ODC_VINA` | Path to AutoDock Vina binary (default: `/workspace/bin/vina`) |
+| `ODC_RECEPTOR` | Path to PfDHODH receptor PDBQT (required for docking) |
+
+### Docking Setup (Optional)
+
+The judgment layer includes AutoDock Vina docking for LOCAL pocket scoring (NOT official GPU scores).
+
+**Requirements:**
+- AutoDock Vina 1.2.5+
+- Meeko (for ligand preparation): `pip install meeko`
+- PfDHODH receptor PDBQT (PDB 5TBO, meeko-prepared)
+
+**Configuration:**
+```bash
+export ODC_VINA=/path/to/vina
+export ODC_RECEPTOR=/path/to/5TBO_receptor.pdbqt
+```
+
+**Box parameters (78Z/DSM421 centroid in 5TBO):**
+- Center: (23.498, -17.282, -15.054)
+- Size: 24 Å cubic
+
+If vina or receptor not available, docking returns `status=unavailable` (does NOT fake kcal scores). The judgment layer will fall back to binding potential estimate (rough MW/logP/H-bond heuristic).
+
+**Sanity check:** Crystal 78Z redocked at -11.79 kcal/mol (LOCAL Vina score, not official).
 
 ## Tests
 

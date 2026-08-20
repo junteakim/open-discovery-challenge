@@ -1,4 +1,7 @@
-"""PfDHODH pocket pharmacophore check (LOCAL, not official GPU score).
+"""PfDHODH pharmacophore check (LOCAL 2D SMARTS/Lipinski, not pocket docking).
+
+This is a 2D pharmacophore filter based on DSM265 literature patterns.
+For actual 3D docking into PfDHODH pocket, see discovery/judgment/dock.py.
 
 PfDHODH (PDB 5TBO / DSM265 binding site):
 - Key H-bond residues: HIS185, ARG265
@@ -6,7 +9,7 @@ PfDHODH (PDB 5TBO / DSM265 binding site):
 - Requires: aromatic ring, H-bond acceptor (for HIS185/ARG265), 
   H-bond donor OR basic N, not just alkyl chains
 
-This is a LOCAL filter, NOT an official scoring function.
+This is a LOCAL 2D filter, NOT an official scoring function.
 """
 
 from __future__ import annotations
@@ -131,12 +134,12 @@ def check_pfdhod_pharmacophore(smiles: str) -> dict[str, any]:
 
 
 # PDB 5TBO information (DSM265 bound to PfDHODH)
-# If environment allows, could download and extract ligand coords
-# For now, pharmacophore-only check is sufficient
+# 3D docking is implemented in discovery/judgment/dock.py (AutoDock Vina wrapper)
+# This module (pocket.py) provides 2D pharmacophore filtering only
 PDB_INFO = {
     "pdb_id": "5TBO",
     "ligand": "DSM265",
     "key_residues": ["HIS185", "ARG265"],
     "description": "PfDHODH bound to DSM265 (triazolopyrimidine)",
-    "note": "3D overlay not implemented - using 2D pharmacophore only",
+    "note": "3D docking available in dock.py - this module is 2D SMARTS/Lipinski only",
 }
