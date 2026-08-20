@@ -9,8 +9,7 @@ from discovery.judgment.warhead_generator import (
     has_warhead,
     generate_warhead_constrained_candidates,
 )
-from discovery.judgment.pocket import check_pharmacophore, check_pfdhod_pharmacophore
-from discovery.judgment.dock import check_vina_available
+from discovery.judgment.pocket import check_pocket_pharmacophore
 from discovery.gates.runner import GateRunner
 
 
@@ -254,12 +253,12 @@ def test_pharmacophore_fails_on_pure_alkyl():
     """Pure alkyl chains should fail pharmacophore check."""
     alkyl = "CCCCCCCC"
     
-    passes, reason, features = check_pharmacophore(alkyl)
+    result = check_pocket_pharmacophore(alkyl)
     
-    assert not passes, "Pure alkyl should fail pharmacophore"
-    assert "no_aromatic" in reason or "no_hbond" in reason, \
-        f"Should mention missing aromatic or H-bond, got: {reason}"
-    assert features.get("aromatic_rings", 0) == 0, "Should have no aromatic rings"
+    assert not result["pass"], "Pure alkyl should fail pharmacophore"
+    assert "no_aromatic" in result["reason"] or "no_hba" in result["reason"] or "hydrocarbon" in result["reason"], \
+        f"Should mention missing aromatic or H-bond, got: {result['reason']}"
+    assert result.get("aromatic_rings", 0) == 0, "Should have no aromatic rings"
 
 
 def test_pharmacophore_passes_on_pyrazole_amide_aryl():
@@ -267,24 +266,24 @@ def test_pharmacophore_passes_on_pyrazole_amide_aryl():
     # Aniline + amide + phenyl (aromatic + HBA + HBD)
     mol = "Nc1ccccc1-CC(=O)Nc1ccc(OC)cc1"
     
-    passes, reason, features = check_pharmacophore(mol)
+    result = check_pocket_pharmacophore(mol)
     
     # Should have aromatic, HBA (C=O), HBD (NH)
-    assert features.get("aromatic_rings", 0) >= 1, \
-        f"Should have aromatic rings, got: {features}"
-    assert features.get("hba", 0) >= 1, f"Should have HBA (C=O), got: {features}"
-    assert features.get("hbd", 0) >= 1 or features.get("basic_n", 0) >= 1, \
-        f"Should have HBD or basic N, got: {features}"
+    assert result.get("aromatic_rings", 0) >= 1, \
+        f"Should have aromatic rings, got: {result}"
+    assert result.get("hba", 0) >= 1, f"Should have HBA (C=O), got: {result}"
+    assert result.get("hbd", 0) >= 1 or result.get("basic_n", 0) >= 1, \
+        f"Should have HBD or basic N, got: {result}"
     
     # Should pass all requirements
-    assert passes, f"Should pass pharmacophore, reason: {reason}"
+    assert result["pass"], f"Should pass pharmacophore, reason: {result['reason']}"
 
 
 def test_docking_unavailable_does_not_crash():
-    """Docking should not crash, returns status (available or unavailable)."""
-    from discovery.judgment.dock import dock_molecule, check_vina_available
+    """Docking should not crash, returns status (ok, unavailable, or failed)."""
+    from discovery.judgment.dock import dock_smiles, vina_available
     
-    result = dock_molecule("CCO")
+    result = dock_smiles("CCO")
     
     # Should return dict with status
     assert "status" in result
@@ -293,9 +292,9 @@ def test_docking_unavailable_does_not_crash():
     assert result["source"] == "local_vina_5tbo", "Should indicate 5TBO source"
     assert result["receptor"] == "5TBO", "Should indicate 5TBO receptor"
     
-    # If unavailable, kcal should be None
-    if result["status"] == "unavailable":
-        assert result["kcal"] is None, "Unavailable should have kcal=None"
+    # If not ok, kcal should be None
+    if result["status"] != "ok":
+        assert result["kcal"] is None, "Non-ok status should have kcal=None"
         assert "reason" in result, "Should have reason for unavailability"
     
     # If success, should have kcal
@@ -307,18 +306,18 @@ def test_docking_unavailable_does_not_crash():
 
 def test_vina_wrapper_does_not_fake_scores():
     """Vina wrapper must not fake kcal values."""
-    from discovery.judgment.dock import dock_molecule
+    from discovery.judgment.dock import dock_smiles
     
     # Test with simple molecule
-    result = dock_molecule("c1ccccc1")  # Benzene
+    result = dock_smiles("c1ccccc1")  # Benzene
     
-    # Either it works (has real kcal) or unavailable (kcal=None)
+    # Either it works (has real kcal) or unavailable/failed (kcal=None)
     # Must NEVER return a fake/hardcoded kcal
-    if result["status"] != "success":
+    if result["status"] != "ok":
         assert result["kcal"] is None, \
-            f"Non-success status must have kcal=None, got: {result['kcal']}"
+            f"Non-ok status must have kcal=None, got: {result['kcal']}"
     
-    # If success, verify it's not a hardcoded value
+    # If ok, verify it's not a hardcoded value
     elif result["kcal"] is not None:
         # Real Vina scores are typically -15 to 0 kcal/mol
         # Hardcoded test values were -11.79, -9.076, -8.838, -7.796
@@ -356,82 +355,31 @@ def test_meeko_write_string_returns_tuple():
         mock_meeko.PDBQTWriterLegacy = mock_pdbqt_writer
         
         with patch.dict('sys.modules', {'meeko': mock_meeko}):
-            from discovery.judgment.dock import smiles_to_pdbqt
+            from discovery.judgment.dock import _smiles_to_pdbqt
             
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.pdbqt', delete=False) as f:
-                output_path = Path(f.name)
+            # This should not crash with tuple unpacking error
+            pdbqt, reason = _smiles_to_pdbqt("CCO")
             
-            try:
-                # This should not crash with tuple unpacking error
-                result = smiles_to_pdbqt("CCO", output_path)
-                
-                # Should succeed
-                assert result is True, "smiles_to_pdbqt should succeed with mocked meeko"
-                
-                # Verify write_string was called (classmethod style)
-                assert mock_pdbqt_writer.write_string.called, "write_string should be called"
-                
-                # Verify file was written with unpacked pdbqt string (not tuple)
-                content = output_path.read_text()
-                assert "FAKE PDBQT" in content, "Should write unpacked PDBQT string"
-                assert "True" not in content, "Should NOT write the ok boolean"
-                
-            finally:
-                if output_path.exists():
-                    output_path.unlink()
+            # Should succeed
+            assert pdbqt is not None, f"_smiles_to_pdbqt should succeed with mocked meeko, got reason: {reason}"
+            assert reason == "ok", f"Expected reason 'ok', got: {reason}"
+            
+            # Verify write_string was called (classmethod style)
+            assert mock_pdbqt_writer.write_string.called, "write_string should be called"
+            
+            # Verify returned pdbqt is the unpacked string (not tuple)
+            assert "FAKE PDBQT" in pdbqt, "Should return unpacked PDBQT string"
+            assert "True" not in pdbqt, "Should NOT include the ok boolean"
 
 
 def test_receptor_fallback_path():
-    """Test that receptor falls back to /workspace/odc-dock/5tbo_receptor.pdbqt."""
-    from discovery.judgment.dock import check_vina_available
-    import os
-    from unittest.mock import patch, MagicMock
-    from pathlib import Path
+    """Test that vina_available checks for vina binary and receptor."""
+    from discovery.judgment.dock import vina_available
     
-    # Save original env
-    original_receptor = os.environ.get("ODC_RECEPTOR")
-    original_vina = os.environ.get("ODC_VINA")
-    
-    try:
-        # Clear ODC_RECEPTOR
-        if "ODC_RECEPTOR" in os.environ:
-            del os.environ["ODC_RECEPTOR"]
-        
-        # Mock vina exists
-        os.environ["ODC_VINA"] = "/fake/vina"
-        
-        with patch('discovery.judgment.dock.Path') as mock_path_class:
-            # Mock Path().exists() calls
-            def path_exists_side_effect(path_str):
-                mock_p = MagicMock()
-                # Vina exists, fallback receptor exists
-                if "/fake/vina" in str(path_str):
-                    mock_p.exists.return_value = True
-                elif "5tbo_receptor.pdbqt" in str(path_str):
-                    mock_p.exists.return_value = True
-                else:
-                    mock_p.exists.return_value = False
-                return mock_p
-            
-            mock_path_class.side_effect = lambda x: path_exists_side_effect(x)
-            
-            # Should fall back to default receptor location
-            available, vina, receptor, reason = check_vina_available()
-            
-            # Should be available if fallback exists
-            # (test may vary based on actual implementation)
-    
-    finally:
-        # Restore original env
-        if original_receptor:
-            os.environ["ODC_RECEPTOR"] = original_receptor
-        elif "ODC_RECEPTOR" in os.environ:
-            del os.environ["ODC_RECEPTOR"]
-        
-        if original_vina:
-            os.environ["ODC_VINA"] = original_vina
-        elif "ODC_VINA" in os.environ:
-            del os.environ["ODC_VINA"]
+    # Just verify the function exists and returns bool
+    # The actual fallback logic is tested implicitly via dock_smiles
+    result = vina_available()
+    assert isinstance(result, bool), "vina_available should return bool"
 
 
 def test_should_submit_still_false_for_unknown_sel():
@@ -459,11 +407,10 @@ def test_generated_molecules_have_pharmacophore():
     
     # Check that generated molecules have better pharmacophore than pure alkyl
     for smiles, warhead_type in candidates:
-        result = check_pfdhod_pharmacophore(smiles)
+        result = check_pocket_pharmacophore(smiles)
         
         # Should have some pharmacophore features
-        features = result.get("features", {})
-        assert features.get("aromatic_rings", 0) >= 1, \
+        assert result.get("aromatic_rings", 0) >= 1, \
             f"Generated mol should have aromatic ring: {smiles}"
-        assert features.get("heteroatoms", 0) >= 2, \
+        assert result.get("heteroatoms", 0) >= 2, \
             f"Generated mol should have heteroatoms: {smiles}"

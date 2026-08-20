@@ -15,8 +15,8 @@ from discovery.gates.runner import GateRunner
 from discovery.judgment.empirical_prior import compute_empirical_prior
 from discovery.judgment.failed_families import check_failed_family
 from discovery.judgment.warhead_generator import has_warhead
-from discovery.judgment.pocket import check_pfdhod_pharmacophore
-from discovery.judgment.dock import dock_molecule, estimate_binding_potential
+from discovery.judgment.pocket import check_pocket_pharmacophore
+from discovery.judgment.dock import dock_smiles, vina_available
 
 
 @dataclass
@@ -41,9 +41,13 @@ class JudgmentResult:
     mw_band: str
     pharmacophore_match: bool = False
     
+    # Vina docking results (LOCAL only, not official)
+    vina_status: str = "unavailable"
+    vina_kcal: float | None = None
+    
     # Local rank score (for sorting HOLD candidates, NOT an official score)
     # Higher is better. Combines: distance from failed families, DSM distance,
-    # warhead presence, MW in range, gate pass, pharmacophore, binding estimate
+    # warhead presence, MW in range, gate pass, pharmacophore, vina affinity
     local_rank_score: float = 0.0
     
     source: str = "local_judgment_layer"
@@ -68,6 +72,8 @@ def should_submit(
     3. NOT DSM/antimalarial analogue (Tanimoto < 0.45 vs known antimalarials)
     4. Has required warhead (if require_warhead=True)
     5. Empirical prior P(≥60) > 0 (NOT the sel<3 bucket)
+    6. Pharmacophore match (aromatic + HBA for HIS185/ARG265)
+    7. Vina docking available and status == "ok"
     
     MW 500-550 alone is NEVER sufficient for submit.
     
@@ -142,6 +148,34 @@ def should_submit(
     else:
         passes.append("warhead_not_required")
     
+    # Check 6: Pharmacophore (PfDHODH pocket awareness)
+    pharma_result = check_pocket_pharmacophore(canonical)
+    pharma_passes = pharma_result["pass"]
+    
+    if not pharma_passes:
+        holds.append(f"pharmacophore_fail:{pharma_result['reason']}")
+        reasons.append(f"HOLD: Pharmacophore mismatch (no HBA/aromatic for HIS185/ARG265)")
+    else:
+        passes.append(f"pharmacophore_ok:aromatic={pharma_result['aromatic_rings']},hba={pharma_result['hba']}")
+    
+    # Check 7: Vina docking
+    vina_status = "unavailable"
+    vina_kcal = None
+    
+    if vina_available():
+        dock_result = dock_smiles(canonical)
+        vina_status = dock_result["status"]
+        vina_kcal = dock_result["kcal"]
+        
+        if vina_status == "ok" and vina_kcal is not None:
+            passes.append(f"vina_ok:{vina_kcal:.2f}kcal/mol")
+        else:
+            holds.append(f"vina_{vina_status}:{dock_result.get('reason', 'unknown')}")
+            reasons.append(f"HOLD: Vina docking failed or not available")
+    else:
+        holds.append("vina_unavailable:no_binary_or_receptor")
+        reasons.append("HOLD: Vina not available")
+    
     # MW-only check: MW 500-550 alone is NEVER sufficient
     if 500 <= mw <= 550 and len(holds) == 0:
         # All checks passed, but let's make sure it's not just MW-band
@@ -149,25 +183,17 @@ def should_submit(
             holds.append(f"mw_500_550_but_low_prior:p={empirical_p:.3f}")
             reasons.append("HOLD: MW 500-550 alone is insufficient (low prior)")
     
-    # Decision
-    can_submit = len(holds) == 0 and gate_passed
+    # Decision: ALL checks must pass, including vina
+    can_submit = (
+        len(holds) == 0 
+        and gate_passed 
+        and vina_status == "ok"
+    )
     
     if can_submit:
         reasons.append(f"SUBMIT: All checks passed (n_checks={len(passes)})")
     elif not reasons:
         reasons.append("HOLD: Default (not all conditions met)")
-    
-    # Check pharmacophore (PfDHODH pocket awareness)
-    pharma_result = check_pfdhod_pharmacophore(canonical)
-    pharma_passes = pharma_result["passes"]
-    
-    # Check docking (if available)
-    dock_result = dock_molecule(canonical)
-    dock_status = dock_result.get("status", "unavailable")
-    dock_affinity = dock_result.get("kcal")
-    
-    # Estimate binding potential (rough heuristic, not actual docking)
-    binding_estimate = estimate_binding_potential(canonical)
     
     # Compute local rank score (for sorting HOLD candidates)
     # This is NOT an official score, just for internal ranking
@@ -191,26 +217,17 @@ def should_submit(
     if 300 <= mw <= 550:
         local_rank += 10.0
     
-    # Pharmacophore match (+15 if passes, otherwise 0)
-    # This separates random alkyl-pyrazoles from pocket-aware designs
+    # Pharmacophore match (+15 if passes)
     if pharma_passes:
         local_rank += 15.0
-        passes.append(f"pharmacophore_match:{pharma_result['features']}")
-    else:
-        holds.append(f"pharmacophore_fail:{pharma_result['reason']}")
     
-    # Docking or binding estimate (+20 max)
-    if dock_status == "success" and dock_affinity is not None:
-        # More negative affinity = better (real Vina kcal/mol)
+    # Vina docking affinity (+20 max, only if status == "ok")
+    if vina_status == "ok" and vina_kcal is not None:
+        # More negative affinity = better
         # Scale: -10 kcal/mol → +20 pts, 0 kcal/mol → 0 pts
-        affinity_score = max(0, min(20, -dock_affinity * 2))
+        affinity_score = max(0, min(20, -vina_kcal * 2))
         local_rank += affinity_score
-        passes.append(f"vina_5tbo:{dock_affinity:.1f}kcal/mol")
-    else:
-        # Use binding estimate heuristic (0-20) when docking unavailable
-        # This is MW/logP/H-bond heuristic, NOT a kcal score
-        local_rank += binding_estimate
-        passes.append(f"binding_heuristic:{binding_estimate:.1f}/20_not_kcal")
+    # If vina unavailable or failed: no points added (no fake heuristic)
     
     # Empirical prior (scaled to max +20, but only if positive)
     if empirical_p > 0:
@@ -228,6 +245,8 @@ def should_submit(
         is_dsm_analogue=is_dsm,
         has_warhead=has_wh,
         pharmacophore_match=pharma_passes,
+        vina_status=vina_status,
+        vina_kcal=vina_kcal,
         mw=mw,
         mw_band=mw_band,
         local_rank_score=local_rank,
@@ -246,7 +265,7 @@ def rank_candidates(
     
     Returns list of (smiles, JudgmentResult) sorted by:
     1. should_submit (True first)
-    2. empirical_prior_p_ge_60 (higher first)
+    2. local_rank_score (higher first)
     3. SMILES (for stable sort)
     
     This is LOCAL ranking only, not official scoring.
@@ -268,7 +287,7 @@ def rank_candidates(
     results.sort(
         key=lambda x: (
             -int(x[1].should_submit),  # True first (negative to reverse)
-            -x[1].local_rank_score,  # Higher rank first (uses distance, warhead, MW, etc.)
+            -x[1].local_rank_score,  # Higher rank first
             x[0],  # Stable sort by SMILES
         )
     )

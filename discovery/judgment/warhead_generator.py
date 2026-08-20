@@ -278,8 +278,9 @@ class WarheadConstrainedGenerator:
             
             # Check pharmacophore (reject pure hydrocarbon + ring only)
             # Import here to avoid circular dependency
-            from discovery.judgment.pocket import check_pharmacophore
-            pharma_pass, pharma_reason, _ = check_pharmacophore(Chem.MolToSmiles(mol))
+            from discovery.judgment.pocket import check_pocket_pharmacophore
+            pharma_result = check_pocket_pharmacophore(Chem.MolToSmiles(mol))
+            pharma_pass = pharma_result["pass"]
             if not pharma_pass:
                 # Skip molecules that fail basic pharmacophore
                 continue
