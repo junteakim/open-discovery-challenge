@@ -5,65 +5,51 @@ from __future__ import annotations
 from discovery.chemistry.fingerprints import max_similarity, morgan_fp, tanimoto
 
 
-# Known failed molecule families from previous submissions.
-# These are actual SMILES from failed submissions (scores 6-41, sel≈0).
-# DO NOT invent scores or InChIKeys. These are documented historical failures.
+# Known failed molecule families from REAL submissions.
+# These are ACTUAL SMILES from /api/leaderboard with REAL official scores.
+# Source: Official leaderboard 2026-08-20. DO NOT invent scores.
 FAILED_SUBMISSIONS = {
-    "benzimidazole_sulfonamide_CF3_5E9964": {
-        "smiles": "c1ccc2[nH]c(S(=O)(=O)NCC)nc2c1c1ccc(C(F)(F)F)cc1",
-        "family": "benzimidazole_sulfonamide",
-        "core": "benzimidazole",
-        "score_range": "6-20",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-5E9964": {
+        "smiles": "COc1cc2[nH]cnc2cc1-c1ccc(S(=O)(=O)NCc2ccc(-c3cccc(C(F)(F)F)c3)cc2)cc1",
+        "total": 41.397,
+        "axes": {"selectivity": 1.69, "binding": 12.35, "activity": 18.23},
+        "reason": "low_selectivity_random_hop",
     },
-    "quinazoline_8F7407": {
-        "smiles": "c1ccc2c(c1)nc(NC(=O)NCCC)nc2c1ccc(OC)cc1",
-        "family": "quinazoline_urea",
-        "core": "quinazoline",
-        "score_range": "15-25",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-8F7407": {
+        "smiles": "COc1c(-c2ccc(-c3ccccc3)cc2)c(-c2ccccc2CNC(=O)c2ccccc2)cc2cncnc12",
+        "total": 19.082,
+        "axes": {"selectivity": 0.0, "binding": 0.76, "activity": 12.28},
+        "reason": "low_selectivity_random_hop",
     },
-    "triazine_DA0285": {
-        "smiles": "c1nc(Nc2ccc(OC)cc2)nc(c3ccc(C)cn3)n1CC(=O)",
-        "family": "triazine_aniline",
-        "core": "triazine",
-        "score_range": "20-30",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-DA0285": {
+        "smiles": "O=C(Nc1ccccc1-c1ncnc(-c2ccccc2NS(=O)(=O)c2ccccc2)n1)c1ccccc1",
+        "total": 5.952,
+        "axes": {"selectivity": 0.0, "binding": 0.35, "activity": 3.71},
+        "reason": "low_selectivity_random_hop",
     },
-    "pyrimidine_2375B0": {
-        "smiles": "c1nc(CCC)nc(c2ccc(OC)cc2)c1S(=O)(=O)NCC",
-        "family": "pyrimidine_sulfonamide",
-        "core": "pyrimidine",
-        "score_range": "30-41",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-2375B0": {
+        "smiles": "O=C(NCc1ccccc1-c1cncnc1-c1ccccc1NS(=O)(=O)c1ccccc1)c1ccccc1",
+        "total": 6.666,
+        "axes": {"selectivity": 0.0, "binding": 0.07, "activity": 4.32},
+        "reason": "low_selectivity_random_hop",
     },
-    "indole_77DF62": {
-        "smiles": "c1ccc2[nH]c(C(=O)NCCC)cc2c1c1ccc(OC)c(c1)c1ccccc1",
-        "family": "indole_carboxamide",
-        "core": "indole",
-        "score_range": "25-35",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-77DF62": {
+        "smiles": "O=S(=O)(Nc1ccccc1-c1cc2cc[nH]c2cc1-c1ccc(-c2ccccc2)cc1)c1ccccc1",
+        "total": 13.135,
+        "axes": {"selectivity": 0.2, "binding": 0.27, "activity": 8.15},
+        "reason": "low_selectivity_random_hop",
     },
-    "benzofuran_618680": {
-        "smiles": "c1ccc2oc(C(=O)NCCc3ccccc3)cc2c1c1ccc(OC)cc1",
-        "family": "benzofuran_amide",
-        "core": "benzofuran",
-        "score_range": "18-28",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-618680": {
+        "smiles": "O=S(=O)(Nc1ccccc1-c1cc2ccoc2cc1-c1cccc(-c2ccccc2)c1)c1ccccc1",
+        "total": 10.278,
+        "axes": {"selectivity": 0.0, "binding": 0.49, "activity": 6.29},
+        "reason": "low_selectivity_random_hop",
     },
-    "quinoline_85EC2C": {
-        "smiles": "c1ccc2c(c1)ccc(C(=O)NCCOC)n2c1ccc(C(F)(F)F)cc1",
-        "family": "quinoline_amide",
-        "core": "quinoline",
-        "score_range": "12-22",
-        "selectivity_estimate": 0.0,
-        "reason": "random_heterocycle_without_pharmacophore",
+    "ODC-85EC2C": {
+        "smiles": "COc1ccc2cc(-c3ccccc3NC(=O)c3ccccc3)c(-c3ccc(-c4ccccc4)cc3)cc2n1",
+        "total": 16.194,
+        "axes": {"selectivity": 0.06, "binding": 0.16, "activity": 10.52},
+        "reason": "low_selectivity_random_hop",
     },
 }
 

@@ -37,6 +37,12 @@ class JudgmentResult:
     # Metadata
     mw: float
     mw_band: str
+    
+    # Local rank score (for sorting HOLD candidates, NOT an official score)
+    # Higher is better. Combines: distance from failed families, DSM distance,
+    # warhead presence, MW in range, gate pass
+    local_rank_score: float = 0.0
+    
     source: str = "local_judgment_layer"
 
 
@@ -148,6 +154,32 @@ def should_submit(
     elif not reasons:
         reasons.append("HOLD: Default (not all conditions met)")
     
+    # Compute local rank score (for sorting HOLD candidates)
+    # This is NOT an official score, just for internal ranking
+    local_rank = 0.0
+    
+    # Base: gate pass (+10)
+    if gate_passed:
+        local_rank += 10.0
+    
+    # Distance from failed families (+20 for low similarity)
+    local_rank += (1.0 - failed_check["max_similarity"]) * 20.0
+    
+    # Distance from DSM (+15 for low similarity)
+    local_rank += (1.0 - dsm_sim) * 15.0
+    
+    # Has warhead (+10)
+    if has_wh:
+        local_rank += 10.0
+    
+    # MW in target range 300-550 (+10)
+    if 300 <= mw <= 550:
+        local_rank += 10.0
+    
+    # Empirical prior (scaled to max +20, but only if positive)
+    if empirical_p > 0:
+        local_rank += min(empirical_p * 20, 20.0)
+    
     return JudgmentResult(
         smiles=canonical,
         should_submit=can_submit,
@@ -161,6 +193,7 @@ def should_submit(
         has_warhead=has_wh,
         mw=mw,
         mw_band=mw_band,
+        local_rank_score=local_rank,
         source="local_judgment_layer",
     )
 
@@ -194,11 +227,11 @@ def rank_candidates(
         )
         results.append((smiles, judgment))
     
-    # Sort: submit first, then by prior, then by smiles
+    # Sort: submit first, then by local rank score, then by smiles
     results.sort(
         key=lambda x: (
             -int(x[1].should_submit),  # True first (negative to reverse)
-            -x[1].empirical_prior_p_ge_60,  # Higher first
+            -x[1].local_rank_score,  # Higher rank first (uses distance, warhead, MW, etc.)
             x[0],  # Stable sort by SMILES
         )
     )

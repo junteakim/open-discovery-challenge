@@ -281,6 +281,7 @@ def cmd_rank(args: argparse.Namespace) -> int:
         decision = "SUBMIT" if judgment.should_submit else "HOLD"
         print(f"\n[{idx}] {decision}: {smiles[:60]}{'...' if len(smiles) > 60 else ''}")
         print(f"    MW: {judgment.mw:.1f} ({judgment.mw_band})")
+        print(f"    Local Rank Score: {judgment.local_rank_score:.1f} [LOCAL metric, NOT official GPU score]")
         print(f"    Empirical P(≥60): {judgment.empirical_prior_p_ge_60:.3f} [LOCAL prior, NOT official]")
         print(f"    Warhead: {'Yes' if judgment.has_warhead else 'No'}")
         print(f"    Failed family: {'Yes (HOLD)' if judgment.is_failed_family else 'No'}")
