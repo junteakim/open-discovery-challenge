@@ -18,6 +18,8 @@ from discovery.providers.stub import StubProvider
 from discovery.scoring import passes_cutoff, rank_candidates
 from discovery.scoring.prior import predict_prior
 from discovery.search.evolution import EvolutionEngine
+from discovery.judgment import should_submit, compute_empirical_prior
+from discovery.judgment.decision import rank_candidates as rank_by_judgment
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("discovery")
@@ -153,22 +155,24 @@ def cmd_submit(args: argparse.Namespace) -> int:
         except ProviderError:
             pass
 
-    # MW-band prior check — block submission if prior lower_bound ≤ 60
-    # This runs even when no replay cache exists
-    prior = predict_prior(smiles)
-    if prior.lower_bound <= 60.0:
+    # Local judgment layer check — block submission if judgment fails
+    # This replaces the old MW-band median (67.6) gate with proper conditionals
+    judgment = should_submit(smiles, require_warhead=False)
+    if not judgment.should_submit:
         logger.error(
-            "Rejected by MW-band prior: band=%s mw=%.1f prior_lower_bound=%.1f cutoff=60.0",
-            prior.mw_band,
-            prior.mw,
-            prior.lower_bound,
+            "Rejected by local judgment layer: band=%s mw=%.1f empirical_P(≥60)=%.3f",
+            judgment.mw_band,
+            judgment.mw,
+            judgment.empirical_prior_p_ge_60,
         )
-        logger.error("Reason: %s", prior.reason)
+        logger.error("HOLD reasons (%d): %s", len(judgment.holds), "; ".join(judgment.holds))
         return 4
 
     if args.dry_run:
         logger.info("Dry run OK: would submit %s", smiles)
-        logger.info("MW-band prior: band=%s mw=%.1f lower_bound=%.1f", prior.mw_band, prior.mw, prior.lower_bound)
+        logger.info("Local judgment: band=%s mw=%.1f empirical_P(≥60)=%.3f [LOCAL prior, NOT official]", 
+                    judgment.mw_band, judgment.mw, judgment.empirical_prior_p_ge_60)
+        logger.info("Passed checks: %s", ", ".join(judgment.passes[:3]) + ("..." if len(judgment.passes) > 3 else ""))
         if cached_score is not None:
             logger.info("Replay cache: effective_score=%.1f", cached_score)
         return 0
@@ -228,6 +232,86 @@ def _mock_score_fn(rng):
     return score
 
 
+def cmd_rank(args: argparse.Namespace) -> int:
+    """
+    Rank candidates using local judgment layer.
+    
+    This is LOCAL ranking ONLY. NOT official GPU scoring.
+    Prints HOLD/SUBMIT decisions with reasons.
+    """
+    root = _root_from_args(args)
+    cfg = Config.from_env(root)
+    
+    # Read candidates from file or stdin
+    candidates = []
+    if args.candidates_file:
+        candidates_path = Path(args.candidates_file)
+        if not candidates_path.exists():
+            logger.error("Candidates file not found: %s", candidates_path)
+            return 1
+        candidates = candidates_path.read_text().strip().split("\n")
+    elif args.smiles:
+        candidates = args.smiles
+    else:
+        logger.error("Must provide --smiles or --candidates-file")
+        return 1
+    
+    # Clean candidates
+    candidates = [c.strip() for c in candidates if c.strip()]
+    
+    if not candidates:
+        logger.error("No candidates provided")
+        return 1
+    
+    logger.info("Ranking %d candidates (LOCAL judgment only, NOT official scores)", len(candidates))
+    
+    # Rank using local judgment
+    ranked = rank_by_judgment(
+        candidates,
+        config=cfg,
+        require_warhead=not args.no_warhead_check,
+    )
+    
+    # Print results
+    print("\n" + "=" * 80)
+    print("LOCAL JUDGMENT RANKING (NOT OFFICIAL GPU SCORES)")
+    print("=" * 80 + "\n")
+    
+    for idx, (smiles, judgment) in enumerate(ranked, 1):
+        decision = "SUBMIT" if judgment.should_submit else "HOLD"
+        print(f"\n[{idx}] {decision}: {smiles[:60]}{'...' if len(smiles) > 60 else ''}")
+        print(f"    MW: {judgment.mw:.1f} ({judgment.mw_band})")
+        print(f"    Empirical P(≥60): {judgment.empirical_prior_p_ge_60:.3f} [LOCAL prior, NOT official]")
+        print(f"    Warhead: {'Yes' if judgment.has_warhead else 'No'}")
+        print(f"    Failed family: {'Yes (HOLD)' if judgment.is_failed_family else 'No'}")
+        print(f"    DSM analogue: {'Yes (HOLD)' if judgment.is_dsm_analogue else 'No'}")
+        
+        if judgment.holds:
+            print(f"    ❌ HOLD reasons ({len(judgment.holds)}):")
+            for hold in judgment.holds:
+                print(f"       - {hold}")
+        
+        if judgment.passes and args.verbose:
+            print(f"    ✓ Passed checks ({len(judgment.passes)}):")
+            for p in judgment.passes[:5]:  # Show first 5
+                print(f"       - {p}")
+        
+        print(f"    Summary: {judgment.reasons[0] if judgment.reasons else 'N/A'}")
+    
+    # Summary stats
+    n_submit = sum(1 for _, j in ranked if j.should_submit)
+    n_hold = len(ranked) - n_submit
+    
+    print("\n" + "=" * 80)
+    print(f"SUMMARY: {n_submit} candidates ready to SUBMIT, {n_hold} to HOLD")
+    print("=" * 80 + "\n")
+    print("⚠️  IMPORTANT: These are LOCAL judgments, NOT official GPU scores.")
+    print("⚠️  Do NOT auto-submit based on these rankings.")
+    print("⚠️  Manual review is required before any submission.\n")
+    
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="discovery", description="FINAL-Bench Open Discovery harness")
     parser.add_argument("--root", type=Path, default=None, help="Project root (default: cwd)")
@@ -259,6 +343,29 @@ def build_parser() -> argparse.ArgumentParser:
     p_submit.add_argument("--family", default="")
     p_submit.add_argument("--dry-run", action="store_true")
     p_submit.set_defaults(func=cmd_submit)
+
+    p_rank = sub.add_parser("rank", help="Rank candidates using local judgment layer (NOT official scores)")
+    p_rank.add_argument(
+        "--smiles",
+        nargs="+",
+        help="SMILES strings to rank",
+    )
+    p_rank.add_argument(
+        "--candidates-file",
+        type=str,
+        help="File with one SMILES per line",
+    )
+    p_rank.add_argument(
+        "--no-warhead-check",
+        action="store_true",
+        help="Skip warhead requirement check",
+    )
+    p_rank.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed pass reasons",
+    )
+    p_rank.set_defaults(func=cmd_rank)
 
     return parser
 
