@@ -17,6 +17,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# Local AutoDock Vina docking (discovery/judgment/dock.py). The vina binary itself
+# is not a Python package; see the Docking Setup section of the README.
+# scipy and gemmi are imported by meeko at load time; prody is needed by
+# mk_prepare_receptor.py to build the 5TBO receptor PDBQT.
+dock = ["meeko>=0.7", "scipy", "gemmi", "prody"]
 
 [project.scripts]
 discovery = "discovery.cli:main"

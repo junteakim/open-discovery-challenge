@@ -46,6 +46,9 @@ python -m discovery submit "SMILES" "Display Name" --dry-run
 # NEW: Local judgment layer (NOT official GPU scores)
 python -m discovery rank --smiles "CCO" "c1ccccc1"
 python -m discovery rank --candidates-file candidates.txt --verbose
+
+# Skip docking for fast triage (every candidate still stays on HOLD)
+python -m discovery rank --smiles "CCO" --no-vina
 ```
 
 **⚠️ IMPORTANT:** The `rank` command produces **LOCAL judgments ONLY**, NOT official GPU scores. Do NOT auto-submit based on these rankings. Manual review is required.
@@ -81,31 +84,73 @@ There is **no public `/api/score`** — official scoring happens after authentic
 | `CHALLENGE_TOKEN` | Alternative auth token |
 | `FINALBENCH_BASE_URL` | Override API base URL |
 | `FINALBENCH_SEASON` | Season number (default 1) |
-| `ODC_VINA` | Path to AutoDock Vina binary (default: `/workspace/bin/vina`) |
-| `ODC_RECEPTOR` | Path to PfDHODH receptor PDBQT (required for docking) |
+| `ODC_VINA` | AutoDock Vina binary (default: `/workspace/bin/vina`) |
+| `ODC_RECEPTOR` | PfDHODH receptor PDBQT (default: `/workspace/odc-dock/5tbo_receptor.pdbqt`) |
 
 ### Docking Setup (Optional)
 
-The judgment layer includes AutoDock Vina docking for LOCAL pocket scoring (NOT official GPU scores).
+`discovery/judgment/dock.py` runs AutoDock Vina against PfDHODH for a LOCAL pocket
+score. A Vina kcal is never an official GPU score, and there is no heuristic
+substitute: when Vina or the receptor is missing, `dock_smiles` returns
+`status="unavailable"` with `kcal=None`, and the judgment layer adds zero points and
+holds the candidate.
 
-**Requirements:**
-- AutoDock Vina 1.2.5+
-- Meeko (for ligand preparation): `pip install meeko`
-- PfDHODH receptor PDBQT (PDB 5TBO, meeko-prepared)
+**Dependencies** (beyond the base install):
 
-**Configuration:**
 ```bash
-export ODC_VINA=/path/to/vina
-export ODC_RECEPTOR=/path/to/5TBO_receptor.pdbqt
+pip install meeko scipy gemmi prody
 ```
 
-**Box parameters (78Z/DSM421 centroid in 5TBO):**
-- Center: (23.498, -17.282, -15.054)
-- Size: 24 Å cubic
+`meeko` imports `scipy` and `gemmi` at module load, and `mk_prepare_receptor.py`
+needs `prody`; without them ligand prep fails with `meeko_missing`.
 
-If vina or receptor not available, docking returns `status=unavailable` (does NOT fake kcal scores). The judgment layer will fall back to binding potential estimate (rough MW/logP/H-bond heuristic).
+**Vina binary:**
 
-**Sanity check:** Crystal 78Z redocked at -11.79 kcal/mol (LOCAL Vina score, not official).
+```bash
+mkdir -p /workspace/bin
+curl -L -o /workspace/bin/vina \
+  https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/v1.2.5/vina_1.2.5_linux_x86_64
+chmod +x /workspace/bin/vina
+```
+
+**Receptor (PDB 5TBO, protein-only, chain A):**
+
+```bash
+mkdir -p /workspace/odc-dock && cd /workspace/odc-dock
+curl -sL -o 5tbo.pdb https://files.rcsb.org/download/5TBO.pdb
+python3 -c "
+out=[]
+for l in open('5tbo.pdb'):
+    if l.startswith('ATOM') and l[21]=='A': out.append(l)
+    elif l.startswith('TER') and out: out.append(l); break
+open('5tbo_protein.pdb','w').writelines(out+['END\n'])"
+mk_prepare_receptor.py -i 5tbo_protein.pdb -o 5tbo_receptor -p \
+  --box_center 23.498 -17.282 -15.054 --box_size 24 24 24 \
+  --default_altloc A -a
+```
+
+`--default_altloc A` is required: residue A:330 has alternate locations and meeko
+refuses to build the receptor without a choice.
+
+Point the env vars elsewhere if you install to different paths:
+
+```bash
+export ODC_VINA=/path/to/vina
+export ODC_RECEPTOR=/path/to/5tbo_receptor.pdbqt
+```
+
+**Box (78Z / DSM421 site in 5TBO):** center (23.498, -17.282, -15.054), 24 Å cube.
+The 25 heavy atoms of 78Z in 5TBO have centroid (23.216, -17.511, -14.763), so the
+box is centered on the ligand site to within ~0.4 Å.
+
+**Verified locally on this receptor** (LOCAL Vina, NOT official GPU scores):
+generated pyrazole candidates docked at -8.09, -8.76, and -8.58 kcal/mol. Reproduce
+with `pytest tests/test_judgment_layer.py -k real_vina`; those tests skip
+automatically when `vina_available()` is false.
+
+Docking dominates runtime (~7 s per candidate), so `rank` accepts `--no-vina` for
+fast triage. Skipping reports `vina_status="skipped"`, contributes no score, and
+leaves every candidate on HOLD.
 
 ## Tests
 
