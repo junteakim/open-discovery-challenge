@@ -41,12 +41,12 @@ VINA_BOX = {
 }
 
 
-def check_vina_available() -> tuple[bool, Path | None, str]:
+def check_vina_available() -> tuple[bool, Path | None, Path | None, str]:
     """
     Check if Vina binary and receptor are available.
     
     Returns:
-        (available, vina_path, reason)
+        (available, vina_path, receptor_path, reason)
     """
     # Check for vina binary
     vina_path = os.environ.get("ODC_VINA")
@@ -63,14 +63,21 @@ def check_vina_available() -> tuple[bool, Path | None, str]:
             if which_vina:
                 vina_bin = Path(which_vina)
             else:
-                return False, None, "vina_binary_not_found"
+                return False, None, None, "vina_binary_not_found"
     
     # Check for receptor
-    receptor_path = os.environ.get("ODC_RECEPTOR")
-    if not receptor_path or not Path(receptor_path).exists():
-        return False, None, "receptor_pdbqt_not_found_set_ODC_RECEPTOR"
+    receptor_path_str = os.environ.get("ODC_RECEPTOR")
+    if receptor_path_str and Path(receptor_path_str).exists():
+        receptor_path = Path(receptor_path_str)
+    else:
+        # Try default fallback location
+        fallback_receptor = Path("/workspace/odc-dock/5tbo_receptor.pdbqt")
+        if fallback_receptor.exists():
+            receptor_path = fallback_receptor
+        else:
+            return False, None, None, "receptor_pdbqt_not_found_set_ODC_RECEPTOR"
     
-    return True, vina_bin, "available"
+    return True, vina_bin, receptor_path, "available"
 
 
 def smiles_to_pdbqt(smiles: str, output_path: Path) -> bool:
@@ -122,10 +129,14 @@ def smiles_to_pdbqt(smiles: str, output_path: Path) -> bool:
         preparator.prepare(mol)
         
         # Write PDBQT
-        writer = PDBQTWriterLegacy()
-        pdbqt_string = writer.write_string(preparator.setup)
+        # meeko 0.7 API: write_string is classmethod returning (pdbqt, ok, err)
+        setup = preparator.setup[0] if isinstance(preparator.setup, list) else preparator.setup
+        pdbqt, ok, err = PDBQTWriterLegacy.write_string(setup)
         
-        output_path.write_text(pdbqt_string)
+        if not ok:
+            return False
+        
+        output_path.write_text(pdbqt)
         return True
     
     except Exception:
@@ -276,7 +287,7 @@ def dock_molecule(smiles: str) -> dict[str, any]:
             - source: str (always "local_vina_5tbo")
     """
     # Check availability
-    available, vina_bin, reason = check_vina_available()
+    available, vina_bin, receptor_path, reason = check_vina_available()
     
     if not available:
         return {
@@ -286,8 +297,6 @@ def dock_molecule(smiles: str) -> dict[str, any]:
             "receptor": "5TBO",
             "source": "local_vina_5tbo",
         }
-    
-    receptor_path = Path(os.environ["ODC_RECEPTOR"])
     
     # Create temp directory for docking
     with tempfile.TemporaryDirectory() as tmpdir:

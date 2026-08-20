@@ -201,18 +201,16 @@ def should_submit(
     
     # Docking or binding estimate (+20 max)
     if dock_status == "success" and dock_affinity is not None:
-        # More negative affinity = better
+        # More negative affinity = better (real Vina kcal/mol)
         # Scale: -10 kcal/mol → +20 pts, 0 kcal/mol → 0 pts
         affinity_score = max(0, min(20, -dock_affinity * 2))
         local_rank += affinity_score
-        passes.append(f"docking_5tbo:{dock_affinity:.1f}kcal/mol")
+        passes.append(f"vina_5tbo:{dock_affinity:.1f}kcal/mol")
     else:
-        # Use binding estimate (0-20) when docking unavailable
+        # Use binding estimate heuristic (0-20) when docking unavailable
+        # This is MW/logP/H-bond heuristic, NOT a kcal score
         local_rank += binding_estimate
-        if dock_status != "success":
-            passes.append(f"docking_unavailable:fallback_estimate:{binding_estimate:.1f}/20")
-        else:
-            passes.append(f"binding_estimate:{binding_estimate:.1f}/20")
+        passes.append(f"binding_heuristic:{binding_estimate:.1f}/20_not_kcal")
     
     # Empirical prior (scaled to max +20, but only if positive)
     if empirical_p > 0:
