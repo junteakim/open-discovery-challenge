@@ -270,6 +270,7 @@ def cmd_rank(args: argparse.Namespace) -> int:
         candidates,
         config=cfg,
         require_warhead=not args.no_warhead_check,
+        use_vina=not args.no_vina,
     )
     
     # Print results
@@ -283,6 +284,14 @@ def cmd_rank(args: argparse.Namespace) -> int:
         print(f"    MW: {judgment.mw:.1f} ({judgment.mw_band})")
         print(f"    Local Rank Score: {judgment.local_rank_score:.1f} [LOCAL metric, NOT official GPU score]")
         print(f"    Empirical P(≥60): {judgment.empirical_prior_p_ge_60:.3f} [LOCAL prior, NOT official]")
+        if judgment.vina_status == "ok" and judgment.vina_kcal is not None:
+            print(
+                f"    Vina 5TBO: {judgment.vina_kcal:.2f} kcal/mol "
+                "[LOCAL AutoDock Vina, NOT official GPU score]"
+            )
+        else:
+            print(f"    Vina 5TBO: {judgment.vina_status} (no kcal, no heuristic substitute)")
+        print(f"    Pharmacophore (2D): {'match' if judgment.pharmacophore_match else 'mismatch'}")
         print(f"    Warhead: {'Yes' if judgment.has_warhead else 'No'}")
         print(f"    Failed family: {'Yes (HOLD)' if judgment.is_failed_family else 'No'}")
         print(f"    DSM analogue: {'Yes (HOLD)' if judgment.is_dsm_analogue else 'No'}")
@@ -348,8 +357,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_rank = sub.add_parser("rank", help="Rank candidates using local judgment layer (NOT official scores)")
     p_rank.add_argument(
         "--smiles",
+        action="extend",
         nargs="+",
-        help="SMILES strings to rank",
+        default=[],
+        help="SMILES strings to rank; repeatable and accepts several per flag",
     )
     p_rank.add_argument(
         "--candidates-file",
@@ -360,6 +371,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-warhead-check",
         action="store_true",
         help="Skip warhead requirement check",
+    )
+    p_rank.add_argument(
+        "--no-vina",
+        action="store_true",
+        help="Skip local Vina docking (fast triage; every candidate stays on HOLD)",
     )
     p_rank.add_argument(
         "--verbose",

@@ -59,6 +59,7 @@ def should_submit(
     gate_runner: GateRunner | None = None,
     require_warhead: bool = True,
     estimated_selectivity: float | None = None,
+    use_vina: bool = True,
 ) -> JudgmentResult:
     """
     Decide whether to submit a candidate based on LOCAL judgment.
@@ -83,6 +84,8 @@ def should_submit(
         gate_runner: Optional GateRunner (will create if None)
         require_warhead: Whether to require warhead presence
         estimated_selectivity: Optional selectivity estimate for prior
+        use_vina: Run local Vina docking. Skipping it never grants points and
+            always keeps the candidate on HOLD.
     
     Returns:
         JudgmentResult with should_submit bool and detailed reasons
@@ -162,7 +165,11 @@ def should_submit(
     vina_status = "unavailable"
     vina_kcal = None
     
-    if vina_available():
+    if not use_vina:
+        vina_status = "skipped"
+        holds.append("vina_skipped:no_heuristic")
+        reasons.append("HOLD: Vina docking skipped")
+    elif vina_available():
         dock_result = dock_smiles(canonical)
         vina_status = dock_result["status"]
         vina_kcal = dock_result["kcal"]
@@ -259,6 +266,7 @@ def rank_candidates(
     config: Config | None = None,
     gate_runner: GateRunner | None = None,
     require_warhead: bool = True,
+    use_vina: bool = True,
 ) -> list[tuple[str, JudgmentResult]]:
     """
     Rank a list of candidates by local judgment.
@@ -280,6 +288,7 @@ def rank_candidates(
             config=config,
             gate_runner=gate_runner,
             require_warhead=require_warhead,
+            use_vina=use_vina,
         )
         results.append((smiles, judgment))
     

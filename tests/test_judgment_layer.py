@@ -1,6 +1,7 @@
 """Tests for local judgment layer."""
 
 import pytest
+from rdkit import Chem
 
 from discovery.judgment import should_submit, compute_empirical_prior
 from discovery.judgment.decision import rank_candidates
@@ -10,6 +11,7 @@ from discovery.judgment.warhead_generator import (
     generate_warhead_constrained_candidates,
 )
 from discovery.judgment.pocket import check_pocket_pharmacophore
+from discovery.judgment.dock import vina_available
 from discovery.gates.runner import GateRunner
 
 
@@ -32,7 +34,7 @@ def test_mw_only_candidate_is_held():
     mw = Chem.Descriptors.MolWt(mol)
     
     # Test the judgment (with warhead requirement turned off for simplicity)
-    result = should_submit(smiles, require_warhead=False)
+    result = should_submit(smiles, require_warhead=False, use_vina=False)
     
     # Core assertion: should be HELD despite MW
     # Reason: unknown selectivity defaults to 0 → empirical P(≥60)=0
@@ -88,7 +90,7 @@ def test_dsm_analogue_is_held():
     assert sim >= 0.99, f"Self-similarity should be ≈1.0, got {sim:.3f}"
     
     # Submit check should detect it as DSM analogue
-    result = should_submit(dsm265, require_warhead=False)
+    result = should_submit(dsm265, require_warhead=False, use_vina=False)
     
     assert not result.should_submit, "DSM265 should be held"
     # May be held for other reasons too, but DSM check should flag it
@@ -125,7 +127,7 @@ def test_warhead_grown_molecule_can_pass_gates_and_rank():
     
     # Rank them - all should get local_rank_score
     smiles_list = [c[0] for c in candidates]
-    ranked = rank_candidates(smiles_list, require_warhead=True)
+    ranked = rank_candidates(smiles_list, require_warhead=True, use_vina=False)
     
     assert len(ranked) == len(candidates), "All candidates should be ranked"
     
@@ -189,7 +191,7 @@ def test_judgment_never_claimed_as_official():
     """JudgmentResult must be labeled as local, never official."""
     smiles = "CCO"
     
-    judgment = should_submit(smiles)
+    judgment = should_submit(smiles, use_vina=False)
     
     assert "local" in judgment.source.lower(), \
         f"Judgment source must indicate local, got: {judgment.source}"
@@ -230,7 +232,7 @@ def test_ranking_sorts_by_submit_then_prior():
         "c1ccc(OC)cc1",  # Small molecule
     ]
     
-    ranked = rank_candidates(candidates, require_warhead=False)
+    ranked = rank_candidates(candidates, require_warhead=False, use_vina=False)
     
     assert len(ranked) == 3
     
@@ -292,14 +294,15 @@ def test_docking_unavailable_does_not_crash():
     assert result["source"] == "local_vina_5tbo", "Should indicate 5TBO source"
     assert result["receptor"] == "5TBO", "Should indicate 5TBO receptor"
     
+    assert result["status"] in {"ok", "unavailable", "failed"}, \
+        f"Unexpected status: {result['status']}"
+    
     # If not ok, kcal should be None
     if result["status"] != "ok":
         assert result["kcal"] is None, "Non-ok status should have kcal=None"
         assert "reason" in result, "Should have reason for unavailability"
-    
-    # If success, should have kcal
-    elif result["status"] == "success":
-        assert result["kcal"] is not None, "Success should have kcal value"
+    else:
+        assert result["kcal"] is not None, "status=ok must carry a kcal value"
         assert isinstance(result["kcal"], (int, float)), "kcal should be numeric"
         assert result["kcal"] < 0, "Vina affinity should be negative"
 
@@ -383,9 +386,13 @@ def test_receptor_fallback_path():
 
 
 def test_should_submit_still_false_for_unknown_sel():
-    """should_submit must still HOLD when selectivity unknown (P≥60=0)."""
-    # Even with good pharmacophore, unknown sel → empirical P=0 → HOLD
-    mol = "c1c[nH]cn1-CC(=O)Nc1ccc(OC)cc1"  # Decent pharmacophore
+    """should_submit must HOLD on unknown selectivity even if Vina docks well.
+
+    Vina is left enabled here on purpose: a good local kcal must not override the
+    empirical P(>=60)=0 hold.
+    """
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"  # Parses, has warhead + pharmacophore
+    assert Chem.MolFromSmiles(mol) is not None, "test molecule must be valid SMILES"
     
     result = should_submit(mol, require_warhead=True)
     
@@ -414,3 +421,61 @@ def test_generated_molecules_have_pharmacophore():
             f"Generated mol should have aromatic ring: {smiles}"
         assert result.get("heteroatoms", 0) >= 2, \
             f"Generated mol should have heteroatoms: {smiles}"
+
+
+def test_vina_skipped_grants_no_points_and_holds():
+    """use_vina=False must report skipped, add no points, and stay on HOLD."""
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"
+    
+    result = should_submit(mol, require_warhead=True, use_vina=False)
+    
+    assert result.vina_status == "skipped", \
+        f"Expected vina_status=skipped, got {result.vina_status}"
+    assert result.vina_kcal is None, "Skipped docking must not produce a kcal"
+    assert not result.should_submit, "Skipped docking must keep the candidate on HOLD"
+    assert any("vina_skipped" in h for h in result.holds), \
+        f"Skip must be recorded as a hold reason, got: {result.holds}"
+
+
+@pytest.mark.skipif(
+    not vina_available(),
+    reason="local vina binary and 5TBO receptor PDBQT not installed",
+)
+def test_real_vina_docking_produces_negative_kcal():
+    """With a real vina + 5TBO receptor, docking must return a real negative kcal."""
+    from discovery.judgment.dock import dock_smiles
+    
+    # Warhead-bearing, pharmacophore-positive candidate (not DSM265/78Z)
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"
+    
+    result = dock_smiles(mol, exhaustiveness=4, num_modes=3)
+    
+    assert result["status"] == "ok", \
+        f"Expected status=ok with vina installed, got {result['status']}: {result.get('reason')}"
+    assert result["kcal"] is not None, "status=ok must carry a kcal"
+    assert -20.0 < result["kcal"] < 0.0, \
+        f"Vina affinity must be a plausible negative kcal, got {result['kcal']}"
+    assert result["poses"], "status=ok must return at least one pose"
+    assert result["poses"][0]["kcal"] == result["kcal"], \
+        "Reported kcal must be the best pose"
+    assert result["source"] == "local_vina_5tbo"
+    assert result["receptor"] == "5TBO"
+
+
+@pytest.mark.skipif(
+    not vina_available(),
+    reason="local vina binary and 5TBO receptor PDBQT not installed",
+)
+def test_real_vina_scores_feed_local_rank():
+    """A real docking run must raise local_rank_score above the docking-less run."""
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"
+    
+    docked = should_submit(mol, require_warhead=True, use_vina=True)
+    skipped = should_submit(mol, require_warhead=True, use_vina=False)
+    
+    assert docked.vina_status == "ok", f"Expected ok, got {docked.vina_status}"
+    assert docked.vina_kcal is not None
+    assert docked.local_rank_score > skipped.local_rank_score, \
+        "Real docking affinity must contribute to the local rank score"
+    # Neither run may submit: selectivity is still unknown
+    assert not docked.should_submit and not skipped.should_submit
