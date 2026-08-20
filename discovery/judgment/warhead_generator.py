@@ -25,11 +25,19 @@ from discovery.gates.runner import GateRunner
 
 # Non-DSM warheads for PfDHODH (ReLink-PyB paper used pyrazole and benzene)
 # DSM265 uses triazolopyrimidine which we MUST avoid (novelty gate poison)
+# Note: These are SMARTS patterns for detection
 WARHEAD_SMARTS = {
-    "pyrazole": "c1cc[nH]n1",  # Pyrazole ring
-    "pyrazole_NH": "c1c[nH]nc1",  # Alternative tautomer
+    "pyrazole": "c1c[nH]cn1",  # Pyrazole ring (correct kekulized form)
+    "pyrazole_alt": "c1c[nH]nn1",  # Pyrazole alternative
     "benzene_NH2": "c1ccc(N)cc1",  # Aniline warhead
     "phenol": "c1ccc(O)cc1",  # Phenol warhead
+}
+
+# Actual SMILES fragments to use in construction
+WARHEAD_FRAGMENTS = {
+    "pyrazole": "c1c[nH]cn1",
+    "aniline": "Nc1ccccc1",
+    "phenol": "Oc1ccccc1",
 }
 
 # Linker fragments to grow from warhead
@@ -92,34 +100,21 @@ def simple_warhead_molecule(warhead: str, linkers: list[str], terminal: str) -> 
     """
     Build a simple molecule: warhead-linker(s)-terminal.
     
-    This is a simplified approach using SMILES concatenation with explicit bonds.
+    This is a simplified approach using SMILES concatenation.
     Returns canonical SMILES or None if invalid.
     """
     if Chem is None:
         return None
     
-    # Start with warhead
-    smiles = warhead
-    
-    # Add linkers
-    for linker in linkers:
-        smiles = f"{smiles}{linker}"
-    
-    # Add terminal
-    smiles = f"{smiles}{terminal}"
+    # Build with explicit single bonds between parts
+    parts = [warhead] + linkers + [terminal]
+    smiles = parts[0]
+    for part in parts[1:]:
+        # Use explicit single bond to connect parts
+        smiles = f"{smiles}-{part}"
     
     # Validate and canonicalize
     valid, canonical = validate_structure(smiles)
-    if valid and canonical:
-        return canonical
-    
-    # Try with explicit single bonds
-    smiles_with_bonds = warhead
-    for linker in linkers:
-        smiles_with_bonds = f"{smiles_with_bonds}-{linker}"
-    smiles_with_bonds = f"{smiles_with_bonds}-{terminal}"
-    
-    valid, canonical = validate_structure(smiles_with_bonds)
     if valid and canonical:
         return canonical
     
@@ -141,7 +136,8 @@ class WarheadConstrainedGenerator:
     ):
         self.gate_runner = gate_runner or GateRunner()
         self.rng = rng or random.Random()
-        self._warheads = list(WARHEAD_SMARTS.values())
+        self._warhead_names = list(WARHEAD_FRAGMENTS.keys())
+        self._warheads = list(WARHEAD_FRAGMENTS.values())
     
     def generate_batch(
         self,
@@ -162,8 +158,9 @@ class WarheadConstrainedGenerator:
             attempts += 1
             
             # Pick warhead
-            warhead = self.rng.choice(self._warheads)
-            warhead_name = [k for k, v in WARHEAD_SMARTS.items() if v == warhead][0]
+            idx = self.rng.randint(0, len(self._warheads) - 1)
+            warhead = self._warheads[idx]
+            warhead_name = self._warhead_names[idx]
             
             # Pick 1-3 linkers
             n_linkers = self.rng.randint(1, max_linkers)
