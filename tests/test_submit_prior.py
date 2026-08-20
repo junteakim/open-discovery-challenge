@@ -75,8 +75,13 @@ def test_submit_dry_run_rejects_450da_molecule(monkeypatch):
         assert exit_code == 4, f"Expected exit code 4 (prior rejection for 450-500 band), got {exit_code}"
 
 
-def test_submit_dry_run_accepts_500_550_band(monkeypatch):
-    """Submit dry-run should accept 500-550 band molecules (median 67.6 >60)."""
+def test_submit_dry_run_holds_500_550_band_on_mw_alone(monkeypatch):
+    """MW 500-550 must NOT pass on the 67.6 band median alone.
+
+    The band median was never conditioned on selectivity, so it cannot act as a
+    submit gate. With selectivity unknown the empirical prior is P(>=60)=0 and the
+    judgment layer holds.
+    """
     import argparse
     
     with tempfile.TemporaryDirectory() as tmp:
@@ -84,7 +89,7 @@ def test_submit_dry_run_accepts_500_550_band(monkeypatch):
         cfg = Config.from_env(root)
         cfg.paths.feedback.parent.mkdir(parents=True, exist_ok=True)
         
-        # Molecule in 500-550 band (~512 Da) - median 67.6, should PASS
+        # Molecule in 500-550 band (~512 Da): band median 67.6 is NOT a submit gate
         args = argparse.Namespace(
             structure="c1ccc2[nH]c(C(=O)NCCc3ccccc3)nc2c1c1ccc(OC)c(C)c1c1ccc2ccccc2c1",
             display_name="Test512Da",
@@ -105,5 +110,7 @@ def test_submit_dry_run_accepts_500_550_band(monkeypatch):
         
         exit_code = cmd_submit(args)
         
-        # Should pass (exit code 0) - median 67.6 > 60
-        assert exit_code == 0, f"Expected exit code 0 (success), got {exit_code}"
+        # MW band alone is never sufficient: judgment layer holds it
+        assert exit_code == 4, (
+            f"MW 500-550 alone must be HELD (expected exit code 4), got {exit_code}"
+        )

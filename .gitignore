@@ -8,3 +8,8 @@ dist/
 build/
 .env
 *.secret
+
+# Local docking artifacts: vina binary, receptor PDBQTs, downloaded PDBs.
+# Rebuild them with the Docking Setup steps in README.md.
+bin/
+odc-dock/
