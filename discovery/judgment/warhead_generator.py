@@ -42,17 +42,25 @@ WARHEAD_CORES = [
 ]
 
 # Linker/extension fragments with attachment points
-# Format: (SMILES, attachment_idx_1, attachment_idx_2)
+# Format: (SMILES, attachment_idx_1, attachment_idx_2, has_hba)
+# Prioritize fragments with H-bond acceptors for PfDHODH pharmacophore
 LINKER_FRAGMENTS = [
-    ("CC", 0, 1),  # Ethyl
-    ("CCC", 0, 2),  # Propyl
-    ("CCCC", 0, 3),  # Butyl
-    ("c1ccccc1", 0, 4),  # Phenyl (attach at positions 1,4)
-    ("c1ccc(OC)cc1", 0, 4),  # Methoxyphenyl
-    ("c1ccncc1", 0, 3),  # Pyridine
-    ("CC(=O)N", 0, 2),  # Acetamide
-    ("CCN", 0, 2),  # Ethylamine
-    ("c1ccc(Cl)cc1", 0, 4),  # Chlorophenyl
+    # H-bond acceptor linkers (preferred for HIS185/ARG265 interaction)
+    ("c1ccncc1", 0, 3, True),  # Pyridine (N is HBA)
+    ("CC(=O)N", 0, 2, True),  # Acetamide (C=O is HBA)
+    ("CC(=O)", 0, 1, True),  # Carbonyl (HBA)
+    ("CCN", 0, 2, True),  # Ethylamine (N is HBA/HBD)
+    ("c1ccc(OC)cc1", 0, 4, True),  # Methoxyphenyl (O is HBA)
+    ("CNC(=O)", 0, 2, True),  # N-methylamide (HBA)
+    ("c1cc(N)ccc1", 0, 4, True),  # Aniline (N is HBD)
+    
+    # Simple aromatic (less preferred, no clear HBA)
+    ("c1ccccc1", 0, 4, False),  # Phenyl
+    ("c1ccc(Cl)cc1", 0, 4, False),  # Chlorophenyl
+    
+    # Short alkyl (discouraged - use sparingly)
+    ("CC", 0, 1, False),  # Ethyl (only if needed)
+    ("CCC", 0, 2, False),  # Propyl (only if needed)
 ]
 
 # Terminal capping groups
@@ -177,6 +185,8 @@ class WarheadConstrainedGenerator:
         """
         Build a molecule: warhead + linkers + terminal.
         
+        Prefers linkers with H-bond acceptors for PfDHODH pharmacophore.
+        
         Returns:
             (mol, warhead_name) or (None, "")
         """
@@ -190,10 +200,27 @@ class WarheadConstrainedGenerator:
             return None, ""
         
         current_attach_idx = warhead_attach_idx
+        has_hba_linker = False
         
-        # Add linker extensions
-        for _ in range(n_extensions):
-            linker_smiles, link_idx1, link_idx2 = self.rng.choice(LINKER_FRAGMENTS)
+        # Add linker extensions - prefer at least one with HBA
+        for i in range(n_extensions):
+            # On first extension, prefer HBA linkers (80% chance)
+            if i == 0 and self.rng.random() < 0.8:
+                # Filter for HBA linkers
+                hba_linkers = [l for l in LINKER_FRAGMENTS if len(l) > 3 and l[3]]
+                if hba_linkers:
+                    linker_data = self.rng.choice(hba_linkers)
+                else:
+                    linker_data = self.rng.choice(LINKER_FRAGMENTS)
+            else:
+                linker_data = self.rng.choice(LINKER_FRAGMENTS)
+            
+            linker_smiles = linker_data[0]
+            link_idx1 = linker_data[1]
+            link_idx2 = linker_data[2]
+            if len(linker_data) > 3 and linker_data[3]:
+                has_hba_linker = True
+            
             linker_mol = Chem.MolFromSmiles(linker_smiles)
             if linker_mol is None:
                 continue
@@ -247,6 +274,14 @@ class WarheadConstrainedGenerator:
             
             # Check drug-likeness
             if not is_drug_like(mol, self.mw_range):
+                continue
+            
+            # Check pharmacophore (reject pure hydrocarbon + ring only)
+            # Import here to avoid circular dependency
+            from discovery.judgment.pocket import check_pharmacophore
+            pharma_pass, pharma_reason, _ = check_pharmacophore(Chem.MolToSmiles(mol))
+            if not pharma_pass:
+                # Skip molecules that fail basic pharmacophore
                 continue
             
             # Get canonical SMILES

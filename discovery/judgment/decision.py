@@ -15,6 +15,8 @@ from discovery.gates.runner import GateRunner
 from discovery.judgment.empirical_prior import compute_empirical_prior
 from discovery.judgment.failed_families import check_failed_family
 from discovery.judgment.warhead_generator import has_warhead
+from discovery.judgment.pocket import check_pfdhod_pharmacophore
+from discovery.judgment.dock import dock_molecule, estimate_binding_potential
 
 
 @dataclass
@@ -37,10 +39,11 @@ class JudgmentResult:
     # Metadata
     mw: float
     mw_band: str
+    pharmacophore_match: bool = False
     
     # Local rank score (for sorting HOLD candidates, NOT an official score)
     # Higher is better. Combines: distance from failed families, DSM distance,
-    # warhead presence, MW in range, gate pass
+    # warhead presence, MW in range, gate pass, pharmacophore, binding estimate
     local_rank_score: float = 0.0
     
     source: str = "local_judgment_layer"
@@ -154,6 +157,18 @@ def should_submit(
     elif not reasons:
         reasons.append("HOLD: Default (not all conditions met)")
     
+    # Check pharmacophore (PfDHODH pocket awareness)
+    pharma_result = check_pfdhod_pharmacophore(canonical)
+    pharma_passes = pharma_result["passes"]
+    
+    # Check docking (if available)
+    dock_result = dock_molecule(canonical)
+    dock_available = dock_result["available"]
+    dock_affinity = dock_result.get("affinity")
+    
+    # Estimate binding potential (rough heuristic, not actual docking)
+    binding_estimate = estimate_binding_potential(canonical)
+    
     # Compute local rank score (for sorting HOLD candidates)
     # This is NOT an official score, just for internal ranking
     local_rank = 0.0
@@ -176,6 +191,26 @@ def should_submit(
     if 300 <= mw <= 550:
         local_rank += 10.0
     
+    # Pharmacophore match (+15 if passes, otherwise 0)
+    # This separates random alkyl-pyrazoles from pocket-aware designs
+    if pharma_passes:
+        local_rank += 15.0
+        passes.append(f"pharmacophore_match:{pharma_result['features']}")
+    else:
+        holds.append(f"pharmacophore_fail:{pharma_result['reason']}")
+    
+    # Docking or binding estimate (+20 max)
+    if dock_available and dock_affinity is not None:
+        # More negative affinity = better
+        # Scale: -10 kcal/mol → +20 pts, 0 kcal/mol → 0 pts
+        affinity_score = max(0, min(20, -dock_affinity * 2))
+        local_rank += affinity_score
+        passes.append(f"docking_affinity:{dock_affinity:.1f}kcal/mol")
+    else:
+        # Use binding estimate (0-20)
+        local_rank += binding_estimate
+        passes.append(f"binding_estimate:{binding_estimate:.1f}/20")
+    
     # Empirical prior (scaled to max +20, but only if positive)
     if empirical_p > 0:
         local_rank += min(empirical_p * 20, 20.0)
@@ -191,6 +226,7 @@ def should_submit(
         is_failed_family=is_failed,
         is_dsm_analogue=is_dsm,
         has_warhead=has_wh,
+        pharmacophore_match=pharma_passes,
         mw=mw,
         mw_band=mw_band,
         local_rank_score=local_rank,

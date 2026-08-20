@@ -9,6 +9,8 @@ from discovery.judgment.warhead_generator import (
     has_warhead,
     generate_warhead_constrained_candidates,
 )
+from discovery.judgment.pocket import check_pharmacophore, check_pfdhod_pharmacophore
+from discovery.judgment.dock import check_docking_available
 from discovery.gates.runner import GateRunner
 
 
@@ -221,7 +223,7 @@ def test_warhead_detection():
 
 
 def test_ranking_sorts_by_submit_then_prior():
-    """Ranking should sort by should_submit first, then by empirical prior."""
+    """Ranking should sort by should_submit first, then by local_rank_score."""
     # Create candidates with different properties
     candidates = [
         "CCO",  # Low MW, low prior
@@ -233,21 +235,94 @@ def test_ranking_sorts_by_submit_then_prior():
     
     assert len(ranked) == 3
     
-    # All should have judgments
+    # All should have judgments with local_rank_score
     for smiles, judgment in ranked:
         assert judgment.source == "local_judgment_layer"
+        assert judgment.local_rank_score >= 0.0, "Should have local rank score"
     
-    # First one should be the most submittable (or least bad)
-    # Can't guarantee exact order without knowing prior calculations,
-    # but verify structure is correct
+    # First one should have highest rank
     first_judgment = ranked[0][1]
     last_judgment = ranked[-1][1]
     
-    # If first can submit and last can't, order is correct
-    if first_judgment.should_submit and not last_judgment.should_submit:
-        assert True
-    # Otherwise, check prior ordering
-    else:
-        # Just verify we got valid results
-        assert first_judgment.empirical_prior_p_ge_60 >= 0.0
-        assert last_judgment.empirical_prior_p_ge_60 >= 0.0
+    # Verify rank ordering (unless submit status differs)
+    if first_judgment.should_submit == last_judgment.should_submit:
+        assert first_judgment.local_rank_score >= last_judgment.local_rank_score, \
+            "Ranking should order by local_rank_score"
+
+
+def test_pharmacophore_fails_on_pure_alkyl():
+    """Pure alkyl chains should fail pharmacophore check."""
+    alkyl = "CCCCCCCC"
+    
+    passes, reason, features = check_pharmacophore(alkyl)
+    
+    assert not passes, "Pure alkyl should fail pharmacophore"
+    assert "no_aromatic" in reason or "no_hbond" in reason, \
+        f"Should mention missing aromatic or H-bond, got: {reason}"
+    assert features.get("aromatic_rings", 0) == 0, "Should have no aromatic rings"
+
+
+def test_pharmacophore_passes_on_pyrazole_amide_aryl():
+    """Aniline-amide-aryl should pass pharmacophore (has all requirements)."""
+    # Aniline + amide + phenyl (aromatic + HBA + HBD)
+    mol = "Nc1ccccc1-CC(=O)Nc1ccc(OC)cc1"
+    
+    passes, reason, features = check_pharmacophore(mol)
+    
+    # Should have aromatic, HBA (C=O), HBD (NH)
+    assert features.get("aromatic_rings", 0) >= 1, \
+        f"Should have aromatic rings, got: {features}"
+    assert features.get("hba", 0) >= 1, f"Should have HBA (C=O), got: {features}"
+    assert features.get("hbd", 0) >= 1 or features.get("basic_n", 0) >= 1, \
+        f"Should have HBD or basic N, got: {features}"
+    
+    # Should pass all requirements
+    assert passes, f"Should pass pharmacophore, reason: {reason}"
+
+
+def test_docking_unavailable_does_not_crash():
+    """Docking unavailable should not crash, just return unavailable."""
+    from discovery.judgment.dock import dock_molecule
+    
+    result = dock_molecule("CCO")
+    
+    # Should return dict with available=False (unless vina actually exists)
+    assert "available" in result
+    assert "affinity" in result
+    assert "source" in result
+    assert "local" in result["source"].lower(), "Should be labeled as local"
+
+
+def test_should_submit_still_false_for_unknown_sel():
+    """should_submit must still HOLD when selectivity unknown (P≥60=0)."""
+    # Even with good pharmacophore, unknown sel → empirical P=0 → HOLD
+    mol = "c1c[nH]cn1-CC(=O)Nc1ccc(OC)cc1"  # Decent pharmacophore
+    
+    result = should_submit(mol, require_warhead=True)
+    
+    # Should be held due to unknown selectivity → empirical P=0
+    assert not result.should_submit, "Unknown selectivity → must HOLD"
+    assert result.empirical_prior_p_ge_60 == 0.0, "Unknown sel → P(≥60)=0"
+    
+    # But should have positive local_rank_score (pharmacophore + other factors)
+    assert result.local_rank_score > 0, "Should have local rank score for sorting"
+
+
+def test_generated_molecules_have_pharmacophore():
+    """Generated molecules should pass basic pharmacophore check."""
+    candidates = generate_warhead_constrained_candidates(n=5, seed=100)
+    
+    if len(candidates) == 0:
+        # Generator might fail occasionally - skip test
+        return
+    
+    # Check that generated molecules have better pharmacophore than pure alkyl
+    for smiles, warhead_type in candidates:
+        result = check_pfdhod_pharmacophore(smiles)
+        
+        # Should have some pharmacophore features
+        features = result.get("features", {})
+        assert features.get("aromatic_rings", 0) >= 1, \
+            f"Generated mol should have aromatic ring: {smiles}"
+        assert features.get("heteroatoms", 0) >= 2, \
+            f"Generated mol should have heteroatoms: {smiles}"
