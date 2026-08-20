@@ -286,11 +286,21 @@ def cmd_rank(args: argparse.Namespace) -> int:
         print(f"    Empirical P(≥60): {judgment.empirical_prior_p_ge_60:.3f} [LOCAL prior, NOT official]")
         if judgment.vina_status == "ok" and judgment.vina_kcal is not None:
             print(
-                f"    Vina 5TBO: {judgment.vina_kcal:.2f} kcal/mol "
+                f"    Vina Pf 5TBO: {judgment.vina_kcal:.2f} kcal/mol "
                 "[LOCAL AutoDock Vina, NOT official GPU score]"
             )
+            if judgment.hs_kcal is not None:
+                print(
+                    f"    Vina Hs 4IGH: {judgment.hs_kcal:.2f} kcal/mol "
+                    "[LOCAL AutoDock Vina, NOT official GPU score]"
+                )
+            if judgment.local_sel_kcal is not None:
+                print(
+                    f"    Local sel gap (Hs-Pf): {judgment.local_sel_kcal:+.2f} kcal/mol "
+                    "[LOCAL docking proxy, NOT official selectivity]"
+                )
         else:
-            print(f"    Vina 5TBO: {judgment.vina_status} (no kcal, no heuristic substitute)")
+            print(f"    Vina Pf/Hs: {judgment.vina_status} (no kcal, no heuristic substitute)")
         print(f"    Pharmacophore (2D): {'match' if judgment.pharmacophore_match else 'mismatch'}")
         print(f"    Warhead: {'Yes' if judgment.has_warhead else 'No'}")
         print(f"    Failed family: {'Yes (HOLD)' if judgment.is_failed_family else 'No'}")

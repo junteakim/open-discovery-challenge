@@ -85,7 +85,9 @@ There is **no public `/api/score`** — official scoring happens after authentic
 | `FINALBENCH_BASE_URL` | Override API base URL |
 | `FINALBENCH_SEASON` | Season number (default 1) |
 | `ODC_VINA` | AutoDock Vina binary (default: `/workspace/bin/vina`) |
-| `ODC_RECEPTOR` | PfDHODH receptor PDBQT (default: `/workspace/odc-dock/5tbo_receptor.pdbqt`) |
+| `ODC_RECEPTOR_PF` | PfDHODH receptor PDBQT (default: `/workspace/odc-dock/5tbo_receptor.pdbqt`) |
+| `ODC_RECEPTOR` | Legacy alias for `ODC_RECEPTOR_PF` |
+| `ODC_RECEPTOR_HS` | HsDHODH receptor PDBQT (default: `/workspace/odc-dock/4igh_receptor.pdbqt`) |
 
 ### Docking Setup (Optional)
 
@@ -113,7 +115,11 @@ curl -L -o /workspace/bin/vina \
 chmod +x /workspace/bin/vina
 ```
 
-**Receptor (PDB 5TBO, protein-only, chain A):**
+**Receptors (protein-only, chain A).** Pf is PDB 5TBO, Hs is PDB 4IGH. Both are
+needed: `dock_selectivity` docks the same 3D ligand into each and the judgment layer
+requires both. Local docking artifacts are gitignored; rebuild them here.
+
+**Pf receptor (5TBO):**
 
 ```bash
 mkdir -p /workspace/odc-dock && cd /workspace/odc-dock
@@ -132,24 +138,70 @@ mk_prepare_receptor.py -i 5tbo_protein.pdb -o 5tbo_receptor -p \
 `--default_altloc A` is required: residue A:330 has alternate locations and meeko
 refuses to build the receptor without a choice.
 
+**Hs receptor (4IGH):**
+
+```bash
+cd /workspace/odc-dock
+curl -sL -o 4igh.pdb https://files.rcsb.org/download/4IGH.pdb
+python3 -c "
+out=[]
+for l in open('4igh.pdb'):
+    if l.startswith('ATOM') and l[21]=='A': out.append(l)
+    elif l.startswith('TER') and out: out.append(l); break
+open('4igh_protein.pdb','w').writelines(out+['END\n'])"
+mk_prepare_receptor.py -i 4igh_protein.pdb -o 4igh_receptor -p \
+  --box_center -7.060 34.707 -2.373 --box_size 24 24 24 \
+  --default_altloc A -a
+```
+
 Point the env vars elsewhere if you install to different paths:
 
 ```bash
 export ODC_VINA=/path/to/vina
-export ODC_RECEPTOR=/path/to/5tbo_receptor.pdbqt
+export ODC_RECEPTOR_PF=/path/to/5tbo_receptor.pdbqt
+export ODC_RECEPTOR_HS=/path/to/4igh_receptor.pdbqt
 ```
 
-**Box (78Z / DSM421 site in 5TBO):** center (23.498, -17.282, -15.054), 24 Å cube.
-The 25 heavy atoms of 78Z in 5TBO have centroid (23.216, -17.511, -14.763), so the
-box is centered on the ligand site to within ~0.4 Å.
+**Boxes**, both 24 Å cubes:
 
-**Verified locally on this receptor** (LOCAL Vina, NOT official GPU scores):
-generated pyrazole candidates docked at -8.09, -8.76, and -8.58 kcal/mol. Reproduce
-with `pytest tests/test_judgment_layer.py -k real_vina`; those tests skip
-automatically when `vina_available()` is false.
+| Target | PDB | Box center | Site ligand | Measured heavy-atom centroid |
+|--------|-----|-----------|-------------|------------------------------|
+| Pf | 5TBO | (23.498, -17.282, -15.054) | 78Z / DSM421 | (23.216, -17.511, -14.763) |
+| Hs | 4IGH | (-7.060, 34.707, -2.373) | 1EA | (-6.524, 35.087, -2.564) |
 
-Docking dominates runtime (~7 s per candidate), so `rank` accepts `--no-vina` for
-fast triage. Skipping reports `vina_status="skipped"`, contributes no score, and
+Each box is centered on its ligand site to within ~0.7 Å.
+
+### LOCAL selectivity proxy
+
+`dock_selectivity(smiles)` docks one 3D conformer into both receptors and reports
+`local_sel_kcal = hs_kcal - pf_kcal`. Positive means the pose prefers Pf.
+`MIN_LOCAL_SEL_KCAL = 2.0`; below that the judgment layer holds.
+
+**This is a docking proxy, not official selectivity, and it is not calibrated.**
+Measured on this receptor pair (LOCAL Vina, exhaustiveness 8):
+
+| Compound | pf_kcal | hs_kcal | gap | Note |
+|----------|---------|---------|-----|------|
+| DSM265 | -6.657 | -9.118 | **-2.461** | ~5000x Pf-selective experimentally; gap has the wrong sign |
+| DSM421 | -11.800 | -10.130 | +1.670 | right sign, still below the 2.0 threshold |
+| teriflunomide | -8.403 | -9.515 | -1.112 | Hs inhibitor, correctly negative |
+
+The gap ranks a known human-DHODH drug correctly but fails on the best-known
+Pf-selective compound, so a `should_submit=True` from this gate is a hint for manual
+review, never evidence of selectivity.
+
+**Verified locally** (LOCAL Vina, NOT official GPU scores): generated pyrazole
+candidates dock to Pf at -8.09, -8.76, and -8.58 kcal/mol. Reproduce with
+`pytest tests/test_judgment_layer.py -k real_vina`; those tests skip automatically
+when the receptors are absent.
+
+**Current yield of the gap gate:** across 14 generated candidates, none reached
+`local_sel_kcal >= 2.0` (best +0.030); every one docked at least as well to human
+DHODH. So the gate is live but not yet passing anything, and the generator needs to
+optimize the gap rather than Pf affinity alone.
+
+Dual docking dominates runtime (~14 s per candidate), so `rank` accepts `--no-vina`
+for fast triage. Skipping reports `vina_status="skipped"`, contributes no score, and
 leaves every candidate on HOLD.
 
 ## Tests

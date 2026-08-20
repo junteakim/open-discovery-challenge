@@ -11,7 +11,11 @@ from discovery.judgment.warhead_generator import (
     generate_warhead_constrained_candidates,
 )
 from discovery.judgment.pocket import check_pocket_pharmacophore
-from discovery.judgment.dock import vina_available
+from discovery.judgment.dock import (
+    MIN_LOCAL_SEL_KCAL,
+    dual_vina_available,
+    vina_available,
+)
 from discovery.gates.runner import GateRunner
 
 
@@ -385,22 +389,21 @@ def test_receptor_fallback_path():
     assert isinstance(result, bool), "vina_available should return bool"
 
 
-def test_should_submit_still_false_for_unknown_sel():
-    """should_submit must HOLD on unknown selectivity even if Vina docks well.
+def test_unknown_official_sel_is_not_a_hold_by_itself():
+    """Unknown official selectivity (P(>=60)=0) must no longer force a HOLD.
 
-    Vina is left enabled here on purpose: a good local kcal must not override the
-    empirical P(>=60)=0 hold.
+    Every unscored candidate has P(>=60)=0, so gating on it held everything forever.
+    The empirical prior is still reported, but it belongs in passes, not holds; the
+    LOCAL Pf-vs-Hs docking gap is the discriminator.
     """
     mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"  # Parses, has warhead + pharmacophore
     assert Chem.MolFromSmiles(mol) is not None, "test molecule must be valid SMILES"
     
-    result = should_submit(mol, require_warhead=True)
+    result = should_submit(mol, require_warhead=True, use_vina=False)
     
-    # Should be held due to unknown selectivity → empirical P=0
-    assert not result.should_submit, "Unknown selectivity → must HOLD"
     assert result.empirical_prior_p_ge_60 == 0.0, "Unknown sel → P(≥60)=0"
-    
-    # But should have positive local_rank_score (pharmacophore + other factors)
+    assert not any("empirical_prior" in h for h in result.holds), \
+        f"P(>=60)=0 must not be a hold reason, got: {result.holds}"
     assert result.local_rank_score > 0, "Should have local rank score for sorting"
 
 
@@ -438,7 +441,7 @@ def test_vina_skipped_grants_no_points_and_holds():
 
 
 @pytest.mark.skipif(
-    not vina_available(),
+    not vina_available("pf"),
     reason="local vina binary and 5TBO receptor PDBQT not installed",
 )
 def test_real_vina_docking_produces_negative_kcal():
@@ -463,8 +466,8 @@ def test_real_vina_docking_produces_negative_kcal():
 
 
 @pytest.mark.skipif(
-    not vina_available(),
-    reason="local vina binary and 5TBO receptor PDBQT not installed",
+    not dual_vina_available(),
+    reason="local vina binary and both 5TBO/4IGH receptor PDBQTs not installed",
 )
 def test_real_vina_scores_feed_local_rank():
     """A real docking run must raise local_rank_score above the docking-less run."""
@@ -477,5 +480,133 @@ def test_real_vina_scores_feed_local_rank():
     assert docked.vina_kcal is not None
     assert docked.local_rank_score > skipped.local_rank_score, \
         "Real docking affinity must contribute to the local rank score"
-    # Neither run may submit: selectivity is still unknown
-    assert not docked.should_submit and not skipped.should_submit
+    assert docked.hs_kcal is not None, "Dual docking must report the Hs affinity"
+    assert docked.local_sel_kcal == pytest.approx(docked.hs_kcal - docked.vina_kcal), \
+        "local_sel_kcal must be hs_kcal - pf_kcal"
+    # Skipping docking can never submit
+    assert not skipped.should_submit
+    # The docked verdict must follow its own gap, not the unknown official selectivity
+    if docked.local_sel_kcal < MIN_LOCAL_SEL_KCAL:
+        assert not docked.should_submit
+        assert any("local_sel_gap" in h for h in docked.holds)
+
+
+@pytest.mark.skipif(
+    not dual_vina_available(),
+    reason="local vina binary and both 5TBO/4IGH receptor PDBQTs not installed",
+)
+def test_dock_selectivity_returns_both_targets_and_gap():
+    """dock_selectivity must dock both targets and report a consistent gap."""
+    from discovery.judgment.dock import dock_selectivity
+    
+    result = dock_selectivity("O=C(Nc1ccc(OC)cc1)Cn1ccnc1", exhaustiveness=4, num_modes=3)
+    
+    assert result["status"] == "ok", f"Expected ok, got {result['status']}: {result.get('reason')}"
+    assert result["source"] == "local_vina_pf_hs"
+    assert result["pf"]["receptor"] == "5TBO"
+    assert result["hs"]["receptor"] == "4IGH"
+    assert result["pf_kcal"] < 0 and result["hs_kcal"] < 0, "Both affinities must be negative"
+    assert result["local_sel_kcal"] == pytest.approx(result["hs_kcal"] - result["pf_kcal"]), \
+        "local_sel_kcal must be hs_kcal - pf_kcal"
+
+
+def _fake_dock(pf_kcal: float, hs_kcal: float, status: str = "ok"):
+    """Build a dock_selectivity stub. Used to exercise decision logic without vina."""
+    def _stub(smiles, **kwargs):
+        return {
+            "smiles": smiles,
+            "status": status,
+            "pf": {"status": status, "kcal": pf_kcal, "receptor": "5TBO"},
+            "hs": {"status": status, "kcal": hs_kcal, "receptor": "4IGH"},
+            "pf_kcal": pf_kcal,
+            "hs_kcal": hs_kcal,
+            "local_sel_kcal": hs_kcal - pf_kcal,
+            "source": "local_vina_pf_hs",
+            "reason": None,
+        }
+    return _stub
+
+
+def test_local_gap_above_threshold_can_clear_the_hold(monkeypatch):
+    """A LOCAL gap >= MIN_LOCAL_SEL_KCAL must be able to clear the deadlock.
+
+    Official selectivity is unknown here (P(>=60)=0), which previously held every
+    candidate forever. With a Pf-preferring local gap the layer can now flag the
+    candidate for review. The flag is LOCAL only.
+    """
+    from discovery.judgment import decision as decision_mod
+    
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"
+    # gap = -7.0 - (-10.0) = +3.0, above the 2.0 threshold
+    monkeypatch.setattr(decision_mod, "dual_vina_available", lambda: True)
+    monkeypatch.setattr(decision_mod, "dock_selectivity", _fake_dock(-10.0, -7.0))
+    
+    result = should_submit(mol, require_warhead=True)
+    
+    assert result.vina_status == "ok"
+    assert result.vina_kcal == -10.0 and result.hs_kcal == -7.0
+    assert result.local_sel_kcal == pytest.approx(3.0)
+    assert result.empirical_prior_p_ge_60 == 0.0, "Official sel is still unknown"
+    assert result.should_submit, (
+        f"Gap {result.local_sel_kcal} >= {MIN_LOCAL_SEL_KCAL} must clear the hold, "
+        f"holds were: {result.holds}"
+    )
+    assert not result.holds, f"Expected no holds, got: {result.holds}"
+
+
+def test_local_gap_below_threshold_holds(monkeypatch):
+    """A gap below the threshold must HOLD and say so."""
+    from discovery.judgment import decision as decision_mod
+    
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"
+    # gap = -9.0 - (-10.0) = +1.0, below the 2.0 threshold
+    monkeypatch.setattr(decision_mod, "dual_vina_available", lambda: True)
+    monkeypatch.setattr(decision_mod, "dock_selectivity", _fake_dock(-10.0, -9.0))
+    
+    result = should_submit(mol, require_warhead=True)
+    
+    assert result.local_sel_kcal == pytest.approx(1.0)
+    assert not result.should_submit, "Gap below threshold must HOLD"
+    assert any("local_sel_gap" in h for h in result.holds), \
+        f"Hold must name the gap, got: {result.holds}"
+
+
+def test_hs_preferring_gap_earns_no_rank_points(monkeypatch):
+    """A negative gap (prefers Hs) must not add rank points for selectivity."""
+    from discovery.judgment import decision as decision_mod
+    
+    mol = "O=C(Nc1ccc(OC)cc1)Cn1ccnc1"
+    monkeypatch.setattr(decision_mod, "dual_vina_available", lambda: True)
+    
+    monkeypatch.setattr(decision_mod, "dock_selectivity", _fake_dock(-9.0, -12.0))
+    prefers_hs = should_submit(mol, require_warhead=True)
+    
+    monkeypatch.setattr(decision_mod, "dock_selectivity", _fake_dock(-9.0, -9.0))
+    neutral = should_submit(mol, require_warhead=True)
+    
+    assert prefers_hs.local_sel_kcal == pytest.approx(-3.0)
+    assert neutral.local_sel_kcal == pytest.approx(0.0)
+    assert prefers_hs.local_rank_score == pytest.approx(neutral.local_rank_score), \
+        "A gap favouring human DHODH must not be rewarded relative to a neutral gap"
+    assert not prefers_hs.should_submit
+
+
+def test_good_gap_cannot_override_the_other_gates(monkeypatch):
+    """A strong LOCAL gap must not rescue a DSM analogue or a warhead-less molecule."""
+    from discovery.judgment import decision as decision_mod
+    
+    monkeypatch.setattr(decision_mod, "dual_vina_available", lambda: True)
+    monkeypatch.setattr(decision_mod, "dock_selectivity", _fake_dock(-12.0, -6.0))
+    
+    # DSM265 analogue: must stay held despite a +6.0 gap
+    from discovery.gates.properties import KNOWN_ANTIMALARIAL_SMILES
+    
+    dsm = should_submit(KNOWN_ANTIMALARIAL_SMILES[0], require_warhead=False)
+    assert dsm.local_sel_kcal == pytest.approx(6.0)
+    assert not dsm.should_submit, "DSM analogue must stay held regardless of gap"
+    assert dsm.is_dsm_analogue
+    
+    # Warhead-less alkane: pharmacophore and warhead gates must still bite
+    alkane = should_submit("CCCCCCCC", require_warhead=True)
+    assert not alkane.should_submit, "No-warhead molecule must stay held"
+    assert any("no_warhead" in h for h in alkane.holds)

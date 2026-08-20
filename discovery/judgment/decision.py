@@ -2,6 +2,10 @@
 
 This module provides LOCAL ranking ONLY. It does NOT produce official GPU scores.
 Default is HOLD unless ALL conditions pass.
+
+Selectivity here is the LOCAL Pf-vs-Hs vina gap (local_sel_kcal = hs_kcal - pf_kcal)
+from discovery.judgment.dock. It is a docking proxy, not official selectivity, and
+`should_submit=True` is a LOCAL flag only -- it never authorizes an automatic submit.
 """
 
 from __future__ import annotations
@@ -16,7 +20,11 @@ from discovery.judgment.empirical_prior import compute_empirical_prior
 from discovery.judgment.failed_families import check_failed_family
 from discovery.judgment.warhead_generator import has_warhead
 from discovery.judgment.pocket import check_pocket_pharmacophore
-from discovery.judgment.dock import dock_smiles, vina_available
+from discovery.judgment.dock import (
+    MIN_LOCAL_SEL_KCAL,
+    dock_selectivity,
+    dual_vina_available,
+)
 
 
 @dataclass
@@ -42,12 +50,18 @@ class JudgmentResult:
     pharmacophore_match: bool = False
     
     # Vina docking results (LOCAL only, not official)
+    # vina_kcal is the Pf (5TBO) affinity, hs_kcal the Hs (4IGH) affinity.
+    # local_sel_kcal = hs_kcal - pf_kcal; positive means the pose prefers Pf.
+    # This is a LOCAL docking proxy, NOT official selectivity.
     vina_status: str = "unavailable"
     vina_kcal: float | None = None
+    hs_kcal: float | None = None
+    local_sel_kcal: float | None = None
     
     # Local rank score (for sorting HOLD candidates, NOT an official score)
     # Higher is better. Combines: distance from failed families, DSM distance,
-    # warhead presence, MW in range, gate pass, pharmacophore, vina affinity
+    # warhead presence, MW in range, gate pass, pharmacophore, Pf affinity,
+    # and the local Pf-vs-Hs gap
     local_rank_score: float = 0.0
     
     source: str = "local_judgment_layer"
@@ -72,11 +86,16 @@ def should_submit(
     2. NOT failed-family analogue (Tanimoto < 0.60 vs known failures)
     3. NOT DSM/antimalarial analogue (Tanimoto < 0.45 vs known antimalarials)
     4. Has required warhead (if require_warhead=True)
-    5. Empirical prior P(≥60) > 0 (NOT the sel<3 bucket)
-    6. Pharmacophore match (aromatic + HBA for HIS185/ARG265)
-    7. Vina docking available and status == "ok"
+    5. Pharmacophore match (aromatic + HBA for HIS185/ARG265)
+    6. Dual Vina docking available and status == "ok"
+    7. local_sel_kcal >= MIN_LOCAL_SEL_KCAL (Pf-vs-Hs gap, LOCAL proxy)
     
     MW 500-550 alone is NEVER sufficient for submit.
+    
+    The official empirical prior P(≥60) is reported but does NOT force a HOLD on its
+    own. Official selectivity is unknown for every unscored candidate, so gating on it
+    held everything forever; the LOCAL Pf-vs-Hs docking gap is the discriminator
+    instead. A `should_submit=True` result is a LOCAL flag for manual review only.
     
     Args:
         smiles: Candidate SMILES
@@ -84,7 +103,7 @@ def should_submit(
         gate_runner: Optional GateRunner (will create if None)
         require_warhead: Whether to require warhead presence
         estimated_selectivity: Optional selectivity estimate for prior
-        use_vina: Run local Vina docking. Skipping it never grants points and
+        use_vina: Run the dual Pf/Hs docking. Skipping it never grants points and
             always keeps the candidate on HOLD.
     
     Returns:
@@ -114,9 +133,13 @@ def should_submit(
     mw = prior.mw
     mw_band = prior.mw_band
     
+    # Reported for context only. P(≥60)=0 means official selectivity is unknown, which
+    # is true of every unscored candidate, so it must not hold the candidate by itself.
+    # The LOCAL Pf-vs-Hs docking gap (check 7) is the discriminator instead.
     if empirical_p <= 0.0:
-        holds.append(f"empirical_prior_p_ge_60=0.0:{prior.reason}")
-        reasons.append(f"HOLD: Empirical P(≥60)=0 (likely sel<3 bucket)")
+        passes.append(
+            f"empirical_prior_p_ge_60=0.0_not_a_hold:{prior.reason}"
+        )
     else:
         passes.append(f"empirical_prior_p_ge_60={empirical_p:.3f}")
     
@@ -161,40 +184,55 @@ def should_submit(
     else:
         passes.append(f"pharmacophore_ok:aromatic={pharma_result['aromatic_rings']},hba={pharma_result['hba']}")
     
-    # Check 7: Vina docking
+    # Check 7: Dual Pf/Hs Vina docking and the LOCAL selectivity gap
     vina_status = "unavailable"
     vina_kcal = None
+    hs_kcal = None
+    local_sel_kcal = None
     
     if not use_vina:
         vina_status = "skipped"
         holds.append("vina_skipped:no_heuristic")
         reasons.append("HOLD: Vina docking skipped")
-    elif vina_available():
-        dock_result = dock_smiles(canonical)
+    elif dual_vina_available():
+        dock_result = dock_selectivity(canonical)
         vina_status = dock_result["status"]
-        vina_kcal = dock_result["kcal"]
+        vina_kcal = dock_result["pf_kcal"]
+        hs_kcal = dock_result["hs_kcal"]
+        local_sel_kcal = dock_result["local_sel_kcal"]
         
-        if vina_status == "ok" and vina_kcal is not None:
-            passes.append(f"vina_ok:{vina_kcal:.2f}kcal/mol")
+        if vina_status == "ok" and local_sel_kcal is not None:
+            passes.append(
+                f"vina_ok:pf={vina_kcal:.2f},hs={hs_kcal:.2f}kcal/mol"
+            )
+            if local_sel_kcal >= MIN_LOCAL_SEL_KCAL:
+                passes.append(
+                    f"local_sel_gap={local_sel_kcal:.2f}>={MIN_LOCAL_SEL_KCAL}kcal_LOCAL_proxy"
+                )
+            else:
+                holds.append(
+                    f"local_sel_gap={local_sel_kcal:.2f}<{MIN_LOCAL_SEL_KCAL}kcal:"
+                    "pf_not_preferred_over_hs"
+                )
+                reasons.append(
+                    f"HOLD: LOCAL Pf-vs-Hs gap {local_sel_kcal:.2f} kcal/mol below "
+                    f"{MIN_LOCAL_SEL_KCAL} threshold"
+                )
         else:
             holds.append(f"vina_{vina_status}:{dock_result.get('reason', 'unknown')}")
-            reasons.append(f"HOLD: Vina docking failed or not available")
+            reasons.append("HOLD: Dual Vina docking failed")
     else:
-        holds.append("vina_unavailable:no_binary_or_receptor")
-        reasons.append("HOLD: Vina not available")
+        holds.append("vina_unavailable:no_binary_or_pf_hs_receptor")
+        reasons.append("HOLD: Dual Vina (Pf + Hs) not available")
     
-    # MW-only check: MW 500-550 alone is NEVER sufficient
-    if 500 <= mw <= 550 and len(holds) == 0:
-        # All checks passed, but let's make sure it's not just MW-band
-        if empirical_p <= 0.5:  # Low prior even in good MW band
-            holds.append(f"mw_500_550_but_low_prior:p={empirical_p:.3f}")
-            reasons.append("HOLD: MW 500-550 alone is insufficient (low prior)")
-    
-    # Decision: ALL checks must pass, including vina
+    # Decision: every gate must pass, docking must be ok, and the LOCAL gap must clear
+    # the threshold. This flag is LOCAL only and never triggers a submit by itself.
     can_submit = (
-        len(holds) == 0 
-        and gate_passed 
+        len(holds) == 0
+        and gate_passed
         and vina_status == "ok"
+        and local_sel_kcal is not None
+        and local_sel_kcal >= MIN_LOCAL_SEL_KCAL
     )
     
     if can_submit:
@@ -228,13 +266,17 @@ def should_submit(
     if pharma_passes:
         local_rank += 15.0
     
-    # Vina docking affinity (+20 max, only if status == "ok")
+    # Pf affinity (+20 max) and LOCAL Pf-vs-Hs gap (+25 max), only when docking is ok.
+    # No substitute is ever computed from MW/logP: a missing dock scores zero here.
     if vina_status == "ok" and vina_kcal is not None:
-        # More negative affinity = better
+        # More negative Pf affinity = better
         # Scale: -10 kcal/mol → +20 pts, 0 kcal/mol → 0 pts
-        affinity_score = max(0, min(20, -vina_kcal * 2))
-        local_rank += affinity_score
-    # If vina unavailable or failed: no points added (no fake heuristic)
+        local_rank += max(0, min(20, -vina_kcal * 2))
+    
+    if vina_status == "ok" and local_sel_kcal is not None:
+        # Only a Pf-preferring gap earns points; an Hs-preferring gap earns none
+        # Scale: +5 kcal/mol gap → +25 pts
+        local_rank += max(0, min(25, local_sel_kcal * 5))
     
     # Empirical prior (scaled to max +20, but only if positive)
     if empirical_p > 0:
@@ -254,6 +296,8 @@ def should_submit(
         pharmacophore_match=pharma_passes,
         vina_status=vina_status,
         vina_kcal=vina_kcal,
+        hs_kcal=hs_kcal,
+        local_sel_kcal=local_sel_kcal,
         mw=mw,
         mw_band=mw_band,
         local_rank_score=local_rank,

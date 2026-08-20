@@ -9,7 +9,14 @@ DO NOT auto-submit based on these scores. DO NOT treat them as official.
 
 from discovery.judgment.decision import should_submit, rank_candidates, JudgmentResult
 from discovery.judgment.empirical_prior import compute_empirical_prior, EmpiricalPrior
-from discovery.judgment.dock import dock_smiles, dock_molecule, vina_available
+from discovery.judgment.dock import (
+    MIN_LOCAL_SEL_KCAL,
+    dock_molecule,
+    dock_selectivity,
+    dock_smiles,
+    dual_vina_available,
+    vina_available,
+)
 from discovery.judgment.pocket import check_pocket_pharmacophore
 
 __all__ = [
@@ -20,6 +27,9 @@ __all__ = [
     "EmpiricalPrior",
     "dock_smiles",
     "dock_molecule",
+    "dock_selectivity",
     "vina_available",
+    "dual_vina_available",
+    "MIN_LOCAL_SEL_KCAL",
     "check_pocket_pharmacophore",
 ]
