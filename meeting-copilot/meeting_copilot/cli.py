@@ -12,6 +12,63 @@ from meeting_copilot.session import create_session, apply_update, write_close_su
 from meeting_copilot.translate import translate_lines
 
 
+def cmd_live(args: argparse.Namespace) -> int:
+    if args.list_devices:
+        try:
+            import sounddevice as sd
+        except ImportError:
+            print("Install live extras: pip install meeting-copilot[live]", file=sys.stderr)
+            return 2
+        print(sd.query_devices())
+        return 0
+
+    config = load_config(Path(args.config) if args.config else DEFAULT_CONFIG)
+    from meeting_copilot.live.pipeline import LivePipeline, LiveSegment
+    from meeting_copilot.live.server import LiveHub, run_live_server
+
+    hub = LiveHub()
+    server = run_live_server(hub, args.host, args.port)
+
+    def on_segment(seg: LiveSegment) -> None:
+        hub.publish(
+            {
+                "text": seg.text,
+                "translated": seg.translated,
+                "lang": seg.lang,
+                "target_lang": seg.target_lang,
+                "partial": seg.partial,
+                "ts": seg.ts,
+            }
+        )
+        if not seg.partial:
+            print(f"[{seg.lang}] {seg.text}")
+            print(f"[{seg.target_lang}] {seg.translated}\n")
+
+    pipeline = LivePipeline(
+        config,
+        lang_a=args.from_lang,
+        lang_b=args.to_lang,
+        whisper_model=args.whisper_model,
+        chunk_seconds=args.chunk_seconds,
+        device_index=args.device,
+        on_segment=on_segment,
+    )
+
+    print(f"실시간 대면 번역: http://{args.host}:{args.port}")
+    print(f"언어: {args.from_lang} ↔ {args.to_lang} (자동 감지)")
+    print("종료: Ctrl+C")
+    pipeline.start()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n종료 중…")
+    finally:
+        pipeline.stop()
+        server.shutdown()
+    return 0
+
+
 def _read_stdin() -> str:
     if sys.stdin.isatty():
         return ""
@@ -181,6 +238,17 @@ def build_parser() -> argparse.ArgumentParser:
     stt.add_argument("--audio", required=True, help="Path to WAV/MP3")
     stt.add_argument("--model", default="base")
     stt.set_defaults(func=cmd_stt)
+
+    live = sub.add_parser("live", help="Real-time face-to-face mic STT + translation UI")
+    live.add_argument("--from-lang", default="ko", help="Language A (e.g. ko, en)")
+    live.add_argument("--to-lang", default="en", help="Language B (bidirectional)")
+    live.add_argument("--host", default="127.0.0.1")
+    live.add_argument("--port", type=int, default=8765)
+    live.add_argument("--whisper-model", default="base", help="tiny/base/small — smaller = lower latency")
+    live.add_argument("--chunk-seconds", type=float, default=1.2, help="Audio window size (seconds)")
+    live.add_argument("--list-devices", action="store_true", help="List audio input devices and exit")
+    live.add_argument("--device", type=int, default=None, help="Input device index")
+    live.set_defaults(func=cmd_live)
 
     return p
 

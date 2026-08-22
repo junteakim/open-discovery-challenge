@@ -12,3 +12,8 @@ translation:
   model: facebook/nllb-200-distilled-600M
   source_lang: eng_Latn
   target_lang: kor_Hang
+
+live:
+  whisper_model: base
+  chunk_seconds: 1.2
+  # Lower latency on Mac: tiny + chunk_seconds: 0.8

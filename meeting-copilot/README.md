@@ -1,119 +1,84 @@
 # Meeting Copilot (Local Mac, 무료 우선)
 
-로컬 Mac에서 Teams 온라인 미팅 또는 실시간 번역과 함께 쓰는 회의 copilot.
+로컬 Mac **대면 실시간 번역** + 회의 copilot (맥락 LLM, 제안).
 
-| 기능 | 무료 구현 |
+| 기능 | 구현 |
 | --- | --- |
-| 전사 | Teams Live Captions → 파일 감시, 또는 BlackHole + faster-whisper |
-| 실시간 번역 | NLLB-200 distilled (CTranslate2) — 다국어 |
-| 맥락 LLM | ontology.json + memory.md 주입 → CLI LLM |
-| 실시간 제안 | 전사 델타 → questions/topics/decisions/followups 갱신 |
+| **실시간 대면 번역** | 마이크 → faster-whisper → Marian/NLLB 즉시 번역 → 브라우저 UI |
+| 전사 (회의 후처리) | 오디오 파일 STT, Teams 자막 파일 (비실시간) |
+| 맥락 LLM | ontology.json + memory.md → CLI LLM |
+| 실시간 제안 | 전사 델타 → questions/decisions/followups |
 
-**약물/의료 프로젝트와 무관** — `discovery` 하네스와 분리된 도구입니다.
+## 실시간 대면 번역 (핵심)
 
-## Quick start
+맥북 마이크로 말하면 **1~2초 내** 원문·번역이 브라우저에 표시됩니다. 양방향(한↔영 등) 자동 감지.
 
 ```bash
 cd meeting-copilot
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[live]"
 
-# 설정 복사
+# 마이크 권한: 시스템 설정 → 개인정보 → 마이크 → Terminal 허용
+python -m meeting_copilot live --from-lang ko --to-lang en
+# → http://127.0.0.1:8765 열기 (폰/태블릿도 같은 Wi‑Fi에서 접속 가능)
+```
+
+**지연 줄이기 (Mac CPU):**
+
+```bash
+python -m meeting_copilot live --from-lang ko --to-lang en \
+  --whisper-model tiny --chunk-seconds 0.9
+```
+
+**마이크 선택:**
+
+```bash
+python -m meeting_copilot live --list-devices
+python -m meeting_copilot live --device 1 --from-lang ko --to-lang en
+```
+
+| 언어 쌍 | 번역 엔진 | 비고 |
+| --- | --- | --- |
+| en↔ko, en↔ja 등 | MarianMT (빠름) | 대면 통역에 적합 |
+| 기타 | NLLB-200 (느림) | 첫 로드 후 캐시 |
+
+첫 실행 시 Whisper·번역 모델 다운로드 (~500MB–1.5GB). 이후 **완전 오프라인·$0**.
+
+---
+
+## 회의 copilot (맥락 + 제안)
+
+ontology/memory를 채운 뒤 세션 생성:
+
+```bash
+pip install -e .
 cp config.example.yaml config.yaml
 cp context/ontology.example.json context/ontology.json
 cp context/memory.example.md context/memory.md
 
-# 회의 세션 생성
-python -m meeting_copilot create --title "Discovery with Company X" --type discovery
-
-# 대시보드 (세션 경로는 create 출력 참고)
-cd sessions/YYYY-MM-DD-*/app && python3 -m http.server 8080
+python -m meeting_copilot create --title "Discovery" --type discovery
 ```
 
-## Teams 실시간 (권장, $0)
+`config.yaml`에서 `llm.provider: claude | codex | grok`.
 
-1. [Teams 웹](https://teams.microsoft.com)에서 회의 입장
-2. **More → Language and speech → Turn on live captions**
-3. 자막 텍스트를 세션 `state/captions.log`에 누적 (수동 paste 또는 브라우저 스니펫)
-4. 감시 시작:
+---
+
+## Teams / 파일 기반 (비실시간 보조)
+
+Teams 자막 파일 감시는 **온라인 회의 요약용**이며 대면 실시간 번역과 다릅니다.
 
 ```bash
-python -m meeting_copilot watch \
-  --session sessions/YYYY-MM-DD-discovery-with-company-x \
-  --captions-file state/captions.log \
-  --translate --target-lang kor
+python -m meeting_copilot watch --session <dir> --captions-file state/captions.log
 ```
 
-`watch`는 파일이 바뀔 때마다 델타를 추출하고, (옵션) 번역 후 CLI LLM으로 탭을 갱신합니다.
+---
 
-### 자막 자동 누적 (선택)
-
-Teams 웹 자막 DOM은 UI 업데이트가 잦아 **완전 자동은 brittle**합니다. 실용적 무료 경로:
-
-- **수동**: 30~60초마다 자막 영역 복사 → `captions.log` append
-- **반자동**: macOS Shortcuts로 클립보드 → 파일 append
-- **오디오**: BlackHole + Whisper — UI에 의존하지 않음
-
-## 로컬 STT (Teams 없을 때)
-
-```bash
-# BlackHole로 시스템 오디오 녹음 후 (Audacity 등)
-python -m meeting_copilot stt --session <dir> --audio recording.wav
-```
-
-## CLI LLM 설정
-
-`config.yaml`:
-
-```yaml
-llm:
-  provider: claude   # claude | codex | grok
-  claude:
-    command: ["claude", "-p", "--output-format", "text"]
-  codex:
-    command: ["codex", "exec", "--full-auto"]
-  grok:
-    command: ["grok", "-p"]
-```
-
-구독 한도 내에서는 **클라우드 CLI가 품질 최고**. 한도 소진 시 `provider: echo`로 파이프라인만 검증.
-
-## Ontology + Memory
-
-- `context/ontology.json` — 도메인 엔티티, 관계, 용어 (회의 전 주입)
-- `context/memory.md` — 브리핑, 가설, 과거 스레드
-
-CREATE 시 briefing에 반영; UPDATE 시 매 델타와 함께 LLM에 전달.
-
-## 번역 (전 언어, 무료)
-
-NLLB-200 distilled:
-
-```bash
-pip install ctranslate2 transformers sentencepiece
-```
-
-`config.yaml`:
-
-```yaml
-translation:
-  backend: nllb
-  model: facebook/nllb-200-distilled-600M
-  source_lang: eng_Latn
-  target_lang: kor_Hang
-```
-
-언어 코드는 [NLLB FLORES-200](https://github.com/facebookresearch/flores/blob/main/flores200/README.md#languages-in-flores-200) 형식.
-
-## 비용 요약
+## 비용
 
 | 구성요소 | 비용 |
 | --- | --- |
-| Teams captions | $0 |
-| NLLB 로컬 | $0 (디스크 ~1GB, CPU) |
-| faster-whisper | $0 |
-| Claude/Codex/Grok CLI | 구독/한도 내 (인프라 $0) |
+| `live` (마이크 STT + 번역) | $0 |
+| CLI LLM (제안/요약) | 구독 한도 내 |
 
 ## License
 

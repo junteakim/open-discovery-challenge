@@ -10,35 +10,43 @@ description: >-
 
 # Meeting Copilot (Local Mac)
 
-로컬 Mac에서 회의 전·중·후를 돌리는 copilot. **전사는 Teams 내장 자막 또는 로컬 Whisper**, **번역은 NLLB(무료) 또는 LLM**, **맥락은 ontology + memory 파일 주입**, **제안은 UPDATE 루프**로 생성한다.
+로컬 Mac에서 회의 전·중·후를 돌리는 copilot.
+
+- **대면 실시간 번역**: `python -m meeting_copilot live` — 마이크 STT + 즉시 번역 UI
+- **맥락/제안**: ontology + memory → CLI LLM (CREATE/UPDATE/CLOSE)
 
 프로젝트 루트의 `meeting-copilot/` CLI를 사용한다.
 
 ## 사전 조건 (Mac)
 
 1. Python 3.11+
-2. (선택) Teams 웹 자막 파일 감시 — `meeting-copilot watch --captions-file`
-3. (선택) 로컬 STT — `pip install faster-whisper` + BlackHole로 시스템 오디오
-4. (선택) 무료 다국어 번역 — `pip install ctranslate2 transformers sentencepiece`
-5. CLI LLM 중 하나: Claude Code (`claude`), Codex (`codex`), Grok (`grok`)
+2. **대면 번역**: `pip install meeting-copilot[live]` + 마이크 권한
+3. CLI LLM (선택): Claude Code, Codex, Grok
+4. ontology/memory 파일 (맥락 주입용)
 
-## 컨텍스트 주입 (ontology + memory)
+## LIVE — 실시간 대면 번역
 
-회의 전에 다음 파일을 채운다:
+```bash
+pip install -e ".[live]"
+python -m meeting_copilot live --from-lang ko --to-lang en
+# 브라우저: http://127.0.0.1:8765
+```
 
-- `meeting-copilot/context/ontology.json` — 엔티티, 관계, 용어 정의
-- `meeting-copilot/context/memory.md` — 사전 브리핑, 과거 대화, 가설
+- 마이크 → faster-whisper (자동 언어 감지) → Marian/NLLB 번역
+- 양방향: ko 말하면 en으로, en 말하면 ko로 번역
+- 지연: `tiny` 모델 + `--chunk-seconds 0.9`
 
-CREATE/UPDATE/CLOSE 시 이 파일들이 LLM 프롬프트에 자동 포함된다.
+Teams `watch`는 **실시간 대면 번역이 아님**. 대면은 반드시 `live` 사용.
 
 ## Modes
 
 | Mode | When | Command |
 | --- | --- | --- |
-| CREATE | 회의 전 | `python -m meeting_copilot create --title "..." --type discovery` |
-| UPDATE | 회의 중 (전사 델타) | `python -m meeting_copilot update --session <dir>` |
+| **LIVE** | 대면 실시간 번역 | `python -m meeting_copilot live --from-lang ko --to-lang en` |
+| CREATE | 회의 전 | `python -m meeting_copilot create --title "..."` |
+| UPDATE | 회의 중 (델타) | `python -m meeting_copilot update --session <dir>` |
 | CLOSE | 회의 후 | `python -m meeting_copilot close --session <dir>` |
-| WATCH | 실시간 입력 | `python -m meeting_copilot watch --session <dir> --captions-file ...` |
+| WATCH | Teams 자막 파일 (비실시간) | `python -m meeting_copilot watch ...` |
 
 ## CREATE
 
