@@ -1,0 +1,28 @@
+{
+  "domain": "example",
+  "entities": [
+    {
+      "id": "company_x",
+      "type": "Organization",
+      "labels": { "en": "Company X" },
+      "facts": ["Series B fintech", "EU expansion"]
+    },
+    {
+      "id": "product_alpha",
+      "type": "Product",
+      "labels": { "en": "Product Alpha" },
+      "facts": ["API-first payments"]
+    }
+  ],
+  "relations": [
+    {
+      "from": "company_x",
+      "to": "product_alpha",
+      "type": "OFFERS"
+    }
+  ],
+  "terms": {
+    "PfDHODH": "Target enzyme (example domain term)",
+    "QBR": "Quarterly business review"
+  }
+}

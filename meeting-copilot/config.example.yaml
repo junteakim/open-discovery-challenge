@@ -1,0 +1,14 @@
+llm:
+  provider: echo
+  claude:
+    command: ["claude", "-p", "--output-format", "text"]
+  codex:
+    command: ["codex", "exec", "--full-auto"]
+  grok:
+    command: ["grok", "-p"]
+
+translation:
+  backend: nllb
+  model: facebook/nllb-200-distilled-600M
+  source_lang: eng_Latn
+  target_lang: kor_Hang
