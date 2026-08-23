@@ -13,7 +13,15 @@ from meeting_copilot.session import create_session, apply_update, write_close_su
 from meeting_copilot.translate import translate_lines
 
 
-def cmd_live(args: argparse.Namespace) -> int:
+def _live_defaults(config: dict, args: argparse.Namespace) -> None:
+    live = config.get("live", {})
+    if live.get("whisper_model") and args.whisper_model == "tiny":
+        args.whisper_model = str(live["whisper_model"])
+    if live.get("chunk_seconds") and args.chunk_seconds == 0.85:
+        args.chunk_seconds = float(live["chunk_seconds"])
+
+
+def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
     if args.list_devices:
         try:
             import sounddevice as sd
@@ -24,12 +32,14 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 0
 
     config = load_config(Path(args.config) if args.config else DEFAULT_CONFIG)
+    _live_defaults(config, args)
+
     from datetime import datetime
 
     from meeting_copilot.live.copilot_engine import CopilotBrain
     from meeting_copilot.live.pipeline import LivePipeline, LiveSegment
     from meeting_copilot.live.server import LiveHub, run_live_server
-    from meeting_copilot.feedback import write_feedback_report
+    from meeting_copilot.overlay import open_overlay_window, wait_until_server
 
     session_dir = Path(args.session) if args.session else (
         PACKAGE_ROOT / "sessions" / f"live-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}"
@@ -46,6 +56,7 @@ def cmd_live(args: argparse.Namespace) -> int:
     )
     hub.brain = brain
     server = run_live_server(hub, args.host, args.port)
+    url = f"http://{args.host}:{args.port}"
 
     def on_segment(seg: LiveSegment) -> None:
         hub.publish(
@@ -77,14 +88,24 @@ def cmd_live(args: argparse.Namespace) -> int:
     )
 
     print("Meeting Copilot (Smooth-style, local)")
-    print(f"UI: http://{args.host}:{args.port}  ← 작은 창으로 고정해 두세요")
+    if use_overlay:
+        print("Always-on-top overlay window")
+    else:
+        print(f"UI: {url}")
     print(f"Session: {session_dir}")
     print(f"Languages: {args.from_lang} ↔ {args.to_lang}")
-    print("종료: Ctrl+C → feedback.md 생성")
+    print("Close window or Ctrl+C → feedback.md")
+
     pipeline.start()
+    if not wait_until_server(args.host, args.port):
+        print("Warning: server slow to start", file=sys.stderr)
+
     try:
-        while True:
-            time.sleep(1)
+        if use_overlay:
+            open_overlay_window(url, width=args.overlay_width, height=args.overlay_height)
+        else:
+            while True:
+                time.sleep(1)
     except KeyboardInterrupt:
         print("\n종료 중…")
     finally:
@@ -95,6 +116,14 @@ def cmd_live(args: argparse.Namespace) -> int:
             out = write_feedback_report(session_dir, config, args.context_dir)
             print(f"feedback: {out}")
     return 0
+
+
+def cmd_live(args: argparse.Namespace) -> int:
+    return _run_live_session(args, use_overlay=False)
+
+
+def cmd_overlay(args: argparse.Namespace) -> int:
+    return _run_live_session(args, use_overlay=True)
 
 
 def _read_stdin() -> str:
@@ -272,13 +301,33 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--to-lang", default="en", help="Language B (bidirectional)")
     live.add_argument("--host", default="127.0.0.1")
     live.add_argument("--port", type=int, default=8765)
-    live.add_argument("--whisper-model", default="base", help="tiny/base/small — smaller = lower latency")
-    live.add_argument("--chunk-seconds", type=float, default=1.2, help="Audio window size (seconds)")
-    live.add_argument("--list-devices", action="store_true", help="List audio input devices and exit")
-    live.add_argument("--device", type=int, default=None, help="Input device index")
-    live.add_argument("--session", default=None, help="Save transcript/feedback here")
-    live.add_argument("--no-feedback-on-exit", action="store_true", help="Skip feedback.md on exit")
+    live.add_argument("--whisper-model", default="tiny", help="tiny/base/small")
+    live.add_argument("--chunk-seconds", type=float, default=0.85)
+    live.add_argument("--list-devices", action="store_true")
+    live.add_argument("--device", type=int, default=None)
+    live.add_argument("--session", default=None)
+    live.add_argument("--overlay-width", type=int, default=420)
+    live.add_argument("--overlay-height", type=int, default=740)
+    live.add_argument("--no-feedback-on-exit", action="store_true")
     live.set_defaults(func=cmd_live)
+
+    overlay = sub.add_parser(
+        "overlay",
+        help="Smooth-style always-on-top overlay (recommended on Mac)",
+    )
+    overlay.add_argument("--from-lang", default="ko")
+    overlay.add_argument("--to-lang", default="en")
+    overlay.add_argument("--host", default="127.0.0.1")
+    overlay.add_argument("--port", type=int, default=8765)
+    overlay.add_argument("--whisper-model", default="tiny")
+    overlay.add_argument("--chunk-seconds", type=float, default=0.85)
+    overlay.add_argument("--list-devices", action="store_true")
+    overlay.add_argument("--device", type=int, default=None)
+    overlay.add_argument("--session", default=None)
+    overlay.add_argument("--no-feedback-on-exit", action="store_true")
+    overlay.add_argument("--overlay-width", type=int, default=420)
+    overlay.add_argument("--overlay-height", type=int, default=740)
+    overlay.set_defaults(func=cmd_overlay)
 
     feedback = sub.add_parser("feedback", help="Smooth-style post-meeting English coaching report")
     feedback.add_argument("--session", required=True)

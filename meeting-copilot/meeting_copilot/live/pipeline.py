@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import json
 import queue
 import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import numpy as np
+
+from meeting_copilot.live.device import resolve_whisper_runtime
 
 SAMPLE_RATE = 16000
 
@@ -19,11 +20,11 @@ class LiveSegment:
     lang: str
     target_lang: str
     partial: bool = False
-    ts: float = field(default_factory=time.time)
+    ts: float = field(default_factory=lambda: __import__("time").time())
 
 
 class LivePipeline:
-    """Mic → streaming STT → immediate translation for face-to-face use."""
+    """Mic → streaming STT → low-latency translation (partial STT first)."""
 
     def __init__(
         self,
@@ -31,24 +32,26 @@ class LivePipeline:
         *,
         lang_a: str,
         lang_b: str,
-        whisper_model: str = "base",
-        chunk_seconds: float = 1.2,
+        whisper_model: str | None = None,
+        chunk_seconds: float | None = None,
         device_index: int | None = None,
         on_segment: Callable[[LiveSegment], None] | None = None,
     ) -> None:
         from meeting_copilot.live.translate_fast import FastTranslator, resolve_lang
 
+        live_cfg = config.get("live", {})
         self._config = config
         self._lang_a_whisper, _ = resolve_lang(lang_a)
         self._lang_b_whisper, _ = resolve_lang(lang_b)
-        self._whisper_model_name = whisper_model
-        self._chunk_seconds = chunk_seconds
+        self._whisper_model_name = whisper_model or live_cfg.get("whisper_model", "tiny")
+        self._chunk_seconds = chunk_seconds or float(live_cfg.get("chunk_seconds", 0.85))
         self._device_index = device_index
         self._on_segment = on_segment
         self._translator = FastTranslator(config)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._whisper = None
+        self._translate_pool = ThreadPoolExecutor(max_workers=1)
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -61,6 +64,7 @@ class LivePipeline:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=5)
+        self._translate_pool.shutdown(wait=False, cancel_futures=True)
 
     def _emit(self, seg: LiveSegment) -> None:
         if self._on_segment:
@@ -82,20 +86,24 @@ class LivePipeline:
                 "Install live extras: pip install meeting-copilot[live]"
             ) from exc
 
+        device, compute = resolve_whisper_runtime(self._config)
         self._whisper = WhisperModel(
             self._whisper_model_name,
-            device="cpu",
-            compute_type="int8",
+            device=device,
+            compute_type=compute,
         )
 
-        block = int(SAMPLE_RATE * 0.1)
+        block = int(SAMPLE_RATE * 0.08)
         frames_per_chunk = int(SAMPLE_RATE * self._chunk_seconds)
-        audio_q: queue.Queue[np.ndarray] = queue.Queue()
+        audio_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
 
         def callback(indata, _frames, _time, status) -> None:
             if status:
                 return
-            audio_q.put(indata.copy().reshape(-1))
+            try:
+                audio_q.put_nowait(indata.copy().reshape(-1))
+            except queue.Full:
+                pass
 
         stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
@@ -107,12 +115,12 @@ class LivePipeline:
         )
 
         buffer = np.array([], dtype=np.float32)
-        last_partial = ""
+        last_text = ""
 
         with stream:
             while not self._stop.is_set():
                 try:
-                    chunk = audio_q.get(timeout=0.2)
+                    chunk = audio_q.get(timeout=0.15)
                 except queue.Empty:
                     continue
                 buffer = np.concatenate([buffer, chunk])
@@ -123,7 +131,7 @@ class LivePipeline:
                 buffer = buffer[frames_per_chunk // 2 :]
 
                 rms = float(np.sqrt(np.mean(window**2)))
-                if rms < 0.008:
+                if rms < 0.006:
                     continue
 
                 segments, info = self._whisper.transcribe(
@@ -132,31 +140,39 @@ class LivePipeline:
                     best_of=1,
                     vad_filter=True,
                     language=None,
+                    condition_on_previous_text=False,
+                    temperature=0.0,
                 )
                 text = " ".join(s.text.strip() for s in segments).strip()
-                if not text or text == last_partial:
+                if not text or text == last_text:
                     continue
 
                 detected = info.language or self._lang_a_whisper
                 tgt = self._target_for(detected)
-                translated = self._translator.translate(text, detected, tgt)
+                last_text = text
 
-                seg = LiveSegment(
-                    text=text,
-                    translated=translated,
-                    lang=detected,
-                    target_lang=tgt,
-                    partial=True,
+                # Show STT immediately (lower perceived latency)
+                self._emit(
+                    LiveSegment(
+                        text=text,
+                        translated="…",
+                        lang=detected,
+                        target_lang=tgt,
+                        partial=True,
+                    )
                 )
-                self._emit(seg)
-                last_partial = text
 
-                final = LiveSegment(
-                    text=text,
-                    translated=translated,
-                    lang=detected,
-                    target_lang=tgt,
-                    partial=False,
+                translated = self._translate_pool.submit(
+                    self._translator.translate, text, detected, tgt
+                ).result()
+
+                self._emit(
+                    LiveSegment(
+                        text=text,
+                        translated=translated,
+                        lang=detected,
+                        target_lang=tgt,
+                        partial=False,
+                    )
                 )
-                self._emit(final)
-                last_partial = ""
+                last_text = ""

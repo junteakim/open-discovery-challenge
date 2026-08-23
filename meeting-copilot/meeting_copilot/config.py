@@ -41,13 +41,20 @@ def load_memory(context_dir: Path | None = None) -> str:
     return path.read_text(encoding="utf-8")
 
 
+from meeting_copilot.ontology import ontology_prompt_block
+
+
 def build_context_block(context_dir: Path | None = None) -> str:
     ontology = load_ontology(context_dir)
     memory = load_memory(context_dir)
     parts: list[str] = []
     if ontology:
-        parts.append("## Ontology (structured context)\n")
-        parts.append(json.dumps(ontology, indent=2, ensure_ascii=False))
+        block = ontology_prompt_block(ontology)
+        if block:
+            parts.append(block)
+        else:
+            parts.append("## Ontology (structured context)\n")
+            parts.append(json.dumps(ontology, indent=2, ensure_ascii=False))
     if memory.strip():
         parts.append("\n## Pre-meeting memory\n")
         parts.append(memory.strip())

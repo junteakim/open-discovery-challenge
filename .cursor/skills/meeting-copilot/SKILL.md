@@ -7,35 +7,32 @@ description: >-
   live translation, non-native English meetings, or ontology context.
 ---
 
-# Meeting Copilot (Local Mac)
+# Meeting Copilot (Smooth AI–style, Local Mac)
 
-로컬 Mac에서 회의 전·중·후를 돌리는 copilot.
+[Smooth AI](https://www.trysmooth.ai)와 유사한 로컬 copilot. **live** 명령 하나로 Live/Brief/Compose UI.
 
-- **대면 실시간 번역**: `python -m meeting_copilot live` — 마이크 STT + 즉시 번역 UI
-- **맥락/제안**: ontology + memory → CLI LLM (CREATE/UPDATE/CLOSE)
-
-프로젝트 루트의 `meeting-copilot/` CLI를 사용한다.
-
-## 사전 조건 (Mac)
-
-1. Python 3.11+
-2. **대면 번역**: `pip install meeting-copilot[live]` + 마이크 권한
-3. CLI LLM (선택): Claude Code, Codex, Grok
-4. ontology/memory 파일 (맥락 주입용)
-
-## LIVE — 실시간 대면 번역
+## LIVE (Smooth 동등 기능)
 
 ```bash
 pip install -e ".[live]"
 python -m meeting_copilot live --from-lang ko --to-lang en
-# 브라우저: http://127.0.0.1:8765
+# http://127.0.0.1:8765 — 작은 창으로 고정
 ```
 
-- 마이크 → faster-whisper (자동 언어 감지) → Marian/NLLB 번역
-- 양방향: ko 말하면 en으로, en 말하면 ko로 번역
-- 지연: `tiny` 모델 + `--chunk-seconds 0.9`
+| Smooth | 구현 |
+| --- | --- |
+| Live translation | Whisper + Marian/NLLB |
+| Live brief | Brief 탭 |
+| Suggested reply | 질문 감지 → LLM |
+| Compose chips | Agree/Disagree/Question/Suggestion |
+| Post feedback | Ctrl+C → feedback.md |
 
-Teams `watch`는 **실시간 대면 번역이 아님**. 대면은 반드시 `live` 사용.
+ontology + memory → 모든 LLM 호출에 주입.
+
+## 아직 없음 (로드맵)
+
+- 네이티브 always-on-top 오버레이 (Tauri)
+- Zoom/Teams 원클릭 시스템 오디오
 
 ## Modes
 

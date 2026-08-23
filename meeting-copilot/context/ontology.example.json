@@ -1,10 +1,19 @@
 {
+  "@context": {
+    "@vocab": "https://meeting-copilot.local/ontology#",
+    "labels": "https://schema.org/name"
+  },
   "domain": "example",
+  "terms": {
+    "PfDHODH": "Target enzyme (domain term)",
+    "QBR": "Quarterly business review",
+    "runway": "Months of cash before funding needed"
+  },
   "entities": [
     {
       "id": "company_x",
       "type": "Organization",
-      "labels": { "en": "Company X" },
+      "labels": { "en": "Company X", "ko": "회사 X" },
       "facts": ["Series B fintech", "EU expansion"]
     },
     {
@@ -15,14 +24,6 @@
     }
   ],
   "relations": [
-    {
-      "from": "company_x",
-      "to": "product_alpha",
-      "type": "OFFERS"
-    }
-  ],
-  "terms": {
-    "PfDHODH": "Target enzyme (example domain term)",
-    "QBR": "Quarterly business review"
-  }
+    { "from": "company_x", "to": "product_alpha", "type": "OFFERS" }
+  ]
 }

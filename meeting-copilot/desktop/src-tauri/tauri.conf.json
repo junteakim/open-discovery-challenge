@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Meeting Copilot",
+  "version": "0.3.0",
+  "identifier": "com.meetingcopilot.desktop",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devUrl": "http://127.0.0.1:8765",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "title": "Meeting Copilot",
+        "width": 420,
+        "height": 740,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop": true,
+        "decorations": true,
+        "transparent": false,
+        "url": "http://127.0.0.1:8765"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

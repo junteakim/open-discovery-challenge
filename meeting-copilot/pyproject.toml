@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meeting-copilot"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local Mac meeting copilot with ontology context and free STT/translation"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -17,6 +17,15 @@ dependencies = [
 stt = ["faster-whisper>=1.0"]
 translate = ["transformers>=4.40", "sentencepiece>=0.2", "torch"]
 live = [
+    "faster-whisper>=1.0",
+    "sounddevice>=0.4",
+    "numpy>=1.26",
+    "transformers>=4.40",
+    "sentencepiece>=0.2",
+    "torch",
+]
+overlay = [
+    "pywebview>=5.0",
     "faster-whisper>=1.0",
     "sounddevice>=0.4",
     "numpy>=1.26",

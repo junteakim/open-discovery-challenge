@@ -1,0 +1,15 @@
+{
+  "name": "meeting-copilot-desktop",
+  "private": true,
+  "version": "0.3.0",
+  "description": "Tauri always-on-top shell for Meeting Copilot (Mac)",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "start:backend": "cd .. && python3 -m meeting_copilot overlay --from-lang ko --to-lang en"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
