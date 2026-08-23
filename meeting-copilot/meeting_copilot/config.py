@@ -16,9 +16,30 @@ def load_config(path: Path | None = None) -> dict[str, Any]:
     if not cfg_path.is_file():
         example = PACKAGE_ROOT / "config.example.yaml"
         if example.is_file():
-            return yaml.safe_load(example.read_text(encoding="utf-8")) or {}
+            data = yaml.safe_load(example.read_text(encoding="utf-8")) or {}
+            return apply_profile(data, data.get("profile"))
         return {}
-    return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    return apply_profile(data, data.get("profile"))
+
+
+def apply_profile(config: dict[str, Any], profile: str | None) -> dict[str, Any]:
+    if not profile:
+        return config
+    profiles = config.get("profiles") or {}
+    patch = profiles.get(profile)
+    if not patch:
+        return config
+    merged = dict(config)
+    for key, val in patch.items():
+        if key == "profiles":
+            continue
+        if isinstance(val, dict) and isinstance(merged.get(key), dict):
+            merged[key] = {**merged[key], **val}
+        else:
+            merged[key] = val
+    merged["profile"] = profile
+    return merged
 
 
 def load_ontology(context_dir: Path | None = None) -> dict[str, Any]:

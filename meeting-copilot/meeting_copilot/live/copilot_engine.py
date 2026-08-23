@@ -12,6 +12,11 @@ from meeting_copilot.llm import (
     SMOOTH_REPLY_SCHEMA,
     run_llm,
 )
+from meeting_copilot.live.lite_copilot import (
+    heuristic_brief,
+    heuristic_compose,
+    heuristic_reply,
+)
 
 QUESTION_RE = re.compile(
     r"(\?|^(could|can|would|will|what|why|how|when|where|who|do you|did you|is there|are we)\b)",
@@ -31,7 +36,7 @@ def looks_like_question(text: str) -> bool:
 @dataclass
 class CopilotState:
     transcript_lines: list[str] = field(default_factory=list)
-    brief: str = "Generating first summary…"
+    brief: str = "Listening…"
     highlights: list[str] = field(default_factory=list)
     last_suggestion: str = ""
     last_suggestion_native: str = ""
@@ -39,7 +44,7 @@ class CopilotState:
 
 
 class CopilotBrain:
-    """Smooth AI–style live brief, question replies, and compose actions."""
+    """Live brief + suggestions. Lite mode = zero LLM cost (MacBook Air)."""
 
     def __init__(
         self,
@@ -47,13 +52,18 @@ class CopilotBrain:
         *,
         context_dir: str | None = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
-        brief_every_n: int = 3,
+        brief_every_n: int | None = None,
     ) -> None:
+        live = config.get("live", {})
+        self._lite = live.get("mode", "lite") == "lite"
         self._config = config
         self._context_dir = context_dir
         self._on_event = on_event
         self._state = CopilotState()
-        self._brief_every_n = max(1, brief_every_n)
+        self._brief_every_n = max(
+            1,
+            brief_every_n or int(live.get("brief_every_n", 5 if self._lite else 3)),
+        )
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._segment_count = 0
@@ -61,6 +71,10 @@ class CopilotBrain:
     @property
     def state(self) -> CopilotState:
         return self._state
+
+    @property
+    def lite(self) -> bool:
+        return self._lite
 
     def transcript_text(self) -> str:
         with self._lock:
@@ -86,19 +100,22 @@ class CopilotBrain:
         self._pool.submit(self._compose, mode, utterance)
 
     def _suggest_reply(self, question: str, translated: str) -> None:
-        prompt = (
-            f"A meeting participant asked or said:\n{question}\n\n"
-            f"Translation hint: {translated}\n\n"
-            f"Recent transcript:\n{self.transcript_text()[-3000:]}\n\n"
-            f"{SMOOTH_REPLY_SCHEMA}"
-        )
-        try:
-            data = run_llm(prompt, self._config, self._context_dir)
-            reply = data.get("reply") or data.get("raw", "")
-            native = data.get("reply_native", reply)
-        except Exception as exc:
-            reply = f"(LLM unavailable: {exc})"
-            native = reply
+        if self._lite:
+            reply, native = heuristic_reply(question, translated, self._context_dir)
+        else:
+            prompt = (
+                f"A meeting participant asked or said:\n{question}\n\n"
+                f"Translation hint: {translated}\n\n"
+                f"Recent transcript:\n{self.transcript_text()[-3000:]}\n\n"
+                f"{SMOOTH_REPLY_SCHEMA}"
+            )
+            try:
+                data = run_llm(prompt, self._config, self._context_dir)
+                reply = data.get("reply") or data.get("raw", "")
+                native = data.get("reply_native", reply)
+            except Exception as exc:
+                reply = f"(LLM unavailable: {exc})"
+                native = reply
 
         with self._lock:
             self._state.last_suggestion = reply
@@ -114,17 +131,22 @@ class CopilotBrain:
         )
 
     def _update_brief(self) -> None:
-        prompt = (
-            f"Live meeting transcript so far:\n{self.transcript_text()[-6000:]}\n\n"
-            f"{SMOOTH_BRIEF_SCHEMA}"
-        )
-        try:
-            data = run_llm(prompt, self._config, self._context_dir)
-            brief = data.get("brief", "")
-            highlights = data.get("highlights", [])
-        except Exception as exc:
-            brief = f"(Brief unavailable: {exc})"
-            highlights = []
+        if self._lite:
+            with self._lock:
+                lines = list(self._state.transcript_lines)
+            brief, highlights = heuristic_brief(lines)
+        else:
+            prompt = (
+                f"Live meeting transcript so far:\n{self.transcript_text()[-6000:]}\n\n"
+                f"{SMOOTH_BRIEF_SCHEMA}"
+            )
+            try:
+                data = run_llm(prompt, self._config, self._context_dir)
+                brief = data.get("brief", "")
+                highlights = data.get("highlights", [])
+            except Exception as exc:
+                brief = f"(Brief unavailable: {exc})"
+                highlights = []
 
         with self._lock:
             self._state.brief = brief or self._state.brief
@@ -134,16 +156,21 @@ class CopilotBrain:
         self._emit({"type": "brief", "brief": brief, "highlights": highlights})
 
     def _compose(self, mode: str, utterance: str | None) -> None:
-        last = utterance or (self._state.transcript_lines[-1] if self._state.transcript_lines else "")
-        schema = SMOOTH_COMPOSE_SCHEMA.format(mode=mode, utterance=last[:500])
-        prompt = f"{schema}\n\nTranscript tail:\n{self.transcript_text()[-2000:]}"
-        try:
-            data = run_llm(prompt, self._config, self._context_dir)
-            reply = data.get("reply", "")
-            native = data.get("reply_native", reply)
-        except Exception as exc:
-            reply = f"(Compose failed: {exc})"
-            native = reply
+        if self._lite:
+            reply, native = heuristic_compose(mode, self._context_dir)
+        else:
+            last = utterance or (
+                self._state.transcript_lines[-1] if self._state.transcript_lines else ""
+            )
+            schema = SMOOTH_COMPOSE_SCHEMA.format(mode=mode, utterance=last[:500])
+            prompt = f"{schema}\n\nTranscript tail:\n{self.transcript_text()[-2000:]}"
+            try:
+                data = run_llm(prompt, self._config, self._context_dir)
+                reply = data.get("reply", "")
+                native = data.get("reply_native", reply)
+            except Exception as exc:
+                reply = f"(Compose failed: {exc})"
+                native = reply
 
         with self._lock:
             self._state.last_compose = reply

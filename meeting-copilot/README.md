@@ -1,53 +1,48 @@
-# Meeting Copilot — Smooth AI–style local alternative
+# Meeting Copilot — MacBook Air (무료·저지연)
 
-[Smooth AI](https://www.trysmooth.ai)와 같은 **비원어민 영어 회의 copilot** — 로컬·무료·ontology 주입.
+**추가 비용 $0** — 회의 중 LLM API 호출 없음 (`lite` 모드).
 
-## 한 줄 시작 (Mac, 권장)
+## MacBook Air 한 줄 실행
 
 ```bash
-cd meeting-copilot
 pip install -e ".[overlay]"
-cp config.example.yaml config.yaml   # llm.provider: claude | codex | grok
+cp config.example.yaml config.yaml
 
 python -m meeting_copilot overlay --from-lang ko --to-lang en
 ```
 
-**always-on-top** 작은 창이 뜹니다 (Smooth와 같은 사용법).
+기본값: `profile: macbook-air`, `live.mode: lite`
 
-## Smooth 기능 대응
+## lite vs full
 
-| Smooth | 명령/구현 |
-| --- | --- |
-| 플로팅 overlay | `overlay` (pywebview) 또는 `desktop/` (Tauri) |
-| Live 번역 | Whisper `tiny` + Marian/NLLB |
-| Brief | Brief 탭 |
-| 답변 제안 | 질문 감지 → LLM |
-| Compose | Agree/Disagree/Question/Suggestion |
-| 회의 후 피드백 | `feedback.md` |
-| ontology 맥락 | `context/ontology.json` (JSON-LD 지원) |
+| | lite (기본) | full (`--full`) |
+| --- | --- | --- |
+| 비용 | **$0** | CLI LLM 구독 한도 |
+| 전사 | Whisper `tiny` CPU | 동일 |
+| 번역 | Marian (로컬) | Marian 또는 LLM |
+| Brief/제안 | 휴리스틱 + ontology | LLM |
+| 회의 후 feedback | 생략 (수동 실행) | auto |
 
-## Zoom/Teams 오디오
+## 지연 최소화 설정 (이미 기본)
 
-```bash
-chmod +x scripts/setup-mac-audio.sh
-./scripts/setup-mac-audio.sh
-python -m meeting_copilot overlay --list-devices
-python -m meeting_copilot overlay --device <BlackHole index> --from-lang ko --to-lang en
-```
+- `whisper_model: tiny`
+- `chunk_seconds: 0.65`
+- `cpu_threads: 4`
+- VAD off in lite (CPU 절약)
+- 전사 먼저 표시 → 번역 뒤따라
 
-## Tauri 네이티브 앱 (선택)
+## LLM 쓰고 싶을 때만
 
 ```bash
-pip install -e ".[live,overlay]"
-python -m meeting_copilot live --from-lang ko --to-lang en   # 터미널 1
-cd desktop && npm install && npm run tauri dev               # 터미널 2
+python -m meeting_copilot overlay --full --from-lang ko --to-lang en
+# config: llm.provider: claude
 ```
 
-## 지연 최적화
+회의 후 영어 피드백 (lite):
 
-- 기본 `whisper_model: tiny`, `chunk_seconds: 0.85`
-- STT 먼저 표시 → 번역은 뒤따라 업데이트
-- `config.yaml`의 `live.whisper_device: auto` (CUDA 있으면 사용)
+```bash
+python -m meeting_copilot feedback --session sessions/live-...
+```
 
 ## License
 

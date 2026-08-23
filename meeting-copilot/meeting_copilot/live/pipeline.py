@@ -24,7 +24,7 @@ class LiveSegment:
 
 
 class LivePipeline:
-    """Mic → streaming STT → low-latency translation (partial STT first)."""
+    """Mic → streaming STT → Marian translation. Optimized for MacBook Air CPU."""
 
     def __init__(
         self,
@@ -41,14 +41,17 @@ class LivePipeline:
 
         live_cfg = config.get("live", {})
         self._config = config
+        self._lite = live_cfg.get("mode", "lite") == "lite"
         self._lang_a_whisper, _ = resolve_lang(lang_a)
         self._lang_b_whisper, _ = resolve_lang(lang_b)
         self._whisper_model_name = whisper_model or live_cfg.get("whisper_model", "tiny")
-        self._chunk_seconds = chunk_seconds or float(live_cfg.get("chunk_seconds", 0.85))
+        default_chunk = 0.65 if self._lite else 0.85
+        self._chunk_seconds = chunk_seconds or float(live_cfg.get("chunk_seconds", default_chunk))
         self._device_index = device_index
         self._on_segment = on_segment
         self._translator = FastTranslator(config)
         self._stop = threading.Event()
+        self._ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._whisper = None
         self._translate_pool = ThreadPoolExecutor(max_workers=1)
@@ -59,6 +62,9 @@ class LivePipeline:
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+
+    def wait_ready(self, timeout: float = 120.0) -> bool:
+        return self._ready.wait(timeout=timeout)
 
     def stop(self) -> None:
         self._stop.set()
@@ -77,6 +83,14 @@ class LivePipeline:
             return self._lang_a_whisper
         return self._lang_b_whisper
 
+    def _maybe_translate(self, text: str, detected: str, tgt: str) -> str:
+        if detected == tgt:
+            return text
+        words = text.split()
+        if self._lite and len(words) < 2:
+            return text
+        return self._translator.translate(text, detected, tgt)
+
     def _run(self) -> None:
         try:
             import sounddevice as sd
@@ -86,16 +100,28 @@ class LivePipeline:
                 "Install live extras: pip install meeting-copilot[live]"
             ) from exc
 
-        device, compute = resolve_whisper_runtime(self._config)
+        device, compute, cpu_threads = resolve_whisper_runtime(self._config)
         self._whisper = WhisperModel(
             self._whisper_model_name,
             device=device,
             compute_type=compute,
+            cpu_threads=cpu_threads,
         )
 
-        block = int(SAMPLE_RATE * 0.08)
         frames_per_chunk = int(SAMPLE_RATE * self._chunk_seconds)
-        audio_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=64)
+        # Warm-up — first real utterance is faster
+        silent = np.zeros(frames_per_chunk, dtype=np.float32)
+        self._whisper.transcribe(
+            silent,
+            beam_size=1,
+            vad_filter=False,
+            language=None,
+            condition_on_previous_text=False,
+        )
+        self._ready.set()
+
+        block = int(SAMPLE_RATE * 0.05)
+        audio_q: queue.Queue[np.ndarray] = queue.Queue(maxsize=32)
 
         def callback(indata, _frames, _time, status) -> None:
             if status:
@@ -103,7 +129,11 @@ class LivePipeline:
             try:
                 audio_q.put_nowait(indata.copy().reshape(-1))
             except queue.Full:
-                pass
+                try:
+                    audio_q.get_nowait()
+                except queue.Empty:
+                    pass
+                audio_q.put_nowait(indata.copy().reshape(-1))
 
         stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
@@ -116,11 +146,12 @@ class LivePipeline:
 
         buffer = np.array([], dtype=np.float32)
         last_text = ""
+        hop = max(1, frames_per_chunk // 3)
 
         with stream:
             while not self._stop.is_set():
                 try:
-                    chunk = audio_q.get(timeout=0.15)
+                    chunk = audio_q.get(timeout=0.1)
                 except queue.Empty:
                     continue
                 buffer = np.concatenate([buffer, chunk])
@@ -128,20 +159,21 @@ class LivePipeline:
                     continue
 
                 window = buffer[:frames_per_chunk]
-                buffer = buffer[frames_per_chunk // 2 :]
+                buffer = buffer[hop:]
 
                 rms = float(np.sqrt(np.mean(window**2)))
-                if rms < 0.006:
+                if rms < 0.005:
                     continue
 
                 segments, info = self._whisper.transcribe(
                     window,
                     beam_size=1,
                     best_of=1,
-                    vad_filter=True,
+                    vad_filter=not self._lite,
                     language=None,
                     condition_on_previous_text=False,
                     temperature=0.0,
+                    without_timestamps=True,
                 )
                 text = " ".join(s.text.strip() for s in segments).strip()
                 if not text or text == last_text:
@@ -151,7 +183,6 @@ class LivePipeline:
                 tgt = self._target_for(detected)
                 last_text = text
 
-                # Show STT immediately (lower perceived latency)
                 self._emit(
                     LiveSegment(
                         text=text,
@@ -163,7 +194,7 @@ class LivePipeline:
                 )
 
                 translated = self._translate_pool.submit(
-                    self._translator.translate, text, detected, tgt
+                    self._maybe_translate, text, detected, tgt
                 ).result()
 
                 self._emit(

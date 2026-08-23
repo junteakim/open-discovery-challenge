@@ -15,10 +15,15 @@ from meeting_copilot.translate import translate_lines
 
 def _live_defaults(config: dict, args: argparse.Namespace) -> None:
     live = config.get("live", {})
+    if args.full:
+        config.setdefault("live", {})["mode"] = "full"
     if live.get("whisper_model") and args.whisper_model == "tiny":
         args.whisper_model = str(live["whisper_model"])
-    if live.get("chunk_seconds") and args.chunk_seconds == 0.85:
+    default_chunk = 0.65 if live.get("mode", "lite") == "lite" else 0.85
+    if live.get("chunk_seconds") and args.chunk_seconds == default_chunk:
         args.chunk_seconds = float(live["chunk_seconds"])
+    elif args.chunk_seconds == 0.85 and live.get("mode") == "lite":
+        args.chunk_seconds = float(live.get("chunk_seconds", 0.65))
 
 
 def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
@@ -32,6 +37,10 @@ def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
         return 0
 
     config = load_config(Path(args.config) if args.config else DEFAULT_CONFIG)
+    if getattr(args, "profile", None):
+        from meeting_copilot.config import apply_profile
+
+        config = apply_profile(config, args.profile)
     _live_defaults(config, args)
 
     from datetime import datetime
@@ -87,7 +96,8 @@ def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
         on_segment=on_segment,
     )
 
-    print("Meeting Copilot (Smooth-style, local)")
+    live_mode = config.get("live", {}).get("mode", "lite")
+    print(f"Mode: {live_mode} (lite = $0 during meeting, no LLM calls)")
     if use_overlay:
         print("Always-on-top overlay window")
     else:
@@ -97,6 +107,8 @@ def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
     print("Close window or Ctrl+C → feedback.md")
 
     pipeline.start()
+    if not pipeline.wait_ready(timeout=120):
+        print("Warning: STT model still loading…", file=sys.stderr)
     if not wait_until_server(args.host, args.port):
         print("Warning: server slow to start", file=sys.stderr)
 
@@ -112,9 +124,11 @@ def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
         pipeline.stop()
         brain.shutdown()
         server.shutdown()
-        if not args.no_feedback_on_exit:
+        if not args.no_feedback_on_exit and live_mode != "lite":
             out = write_feedback_report(session_dir, config, args.context_dir)
             print(f"feedback: {out}")
+        elif live_mode == "lite" and not args.no_feedback_on_exit:
+            print("lite mode: skipped feedback.md (no LLM cost). Run: meeting-copilot feedback --session ...")
     return 0
 
 
@@ -260,6 +274,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Local Mac meeting copilot (Teams captions, ontology context, free translation)",
     )
     p.add_argument("--config", help="Path to config.yaml")
+    p.add_argument("--profile", default="macbook-air", help="Config profile (macbook-air | full)")
+
     p.add_argument("--context-dir", default=str(PACKAGE_ROOT / "context"), help="ontology + memory dir")
 
     sub = p.add_subparsers(dest="command", required=True)
@@ -302,7 +318,8 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--host", default="127.0.0.1")
     live.add_argument("--port", type=int, default=8765)
     live.add_argument("--whisper-model", default="tiny", help="tiny/base/small")
-    live.add_argument("--chunk-seconds", type=float, default=0.85)
+    live.add_argument("--chunk-seconds", type=float, default=0.65)
+    live.add_argument("--full", action="store_true", help="Use LLM during meeting (API cost)")
     live.add_argument("--list-devices", action="store_true")
     live.add_argument("--device", type=int, default=None)
     live.add_argument("--session", default=None)
@@ -320,7 +337,8 @@ def build_parser() -> argparse.ArgumentParser:
     overlay.add_argument("--host", default="127.0.0.1")
     overlay.add_argument("--port", type=int, default=8765)
     overlay.add_argument("--whisper-model", default="tiny")
-    overlay.add_argument("--chunk-seconds", type=float, default=0.85)
+    overlay.add_argument("--chunk-seconds", type=float, default=0.65)
+    overlay.add_argument("--full", action="store_true", help="Use LLM during meeting (API cost)")
     overlay.add_argument("--list-devices", action="store_true")
     overlay.add_argument("--device", type=int, default=None)
     overlay.add_argument("--session", default=None)
