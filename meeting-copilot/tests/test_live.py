@@ -1,4 +1,11 @@
+from meeting_copilot.live.copilot_engine import looks_like_question
 from meeting_copilot.live.server import LiveHub
+
+
+def test_looks_like_question():
+    assert looks_like_question("What do you think?")
+    assert looks_like_question("Can you share the timeline")
+    assert not looks_like_question("Thanks for the update")
 
 
 def test_live_hub_publish_subscribe():

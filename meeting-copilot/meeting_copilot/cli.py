@@ -8,6 +8,7 @@ from pathlib import Path
 from meeting_copilot.config import DEFAULT_CONFIG, PACKAGE_ROOT, load_config
 from meeting_copilot.diff import read_delta_file, write_baseline
 from meeting_copilot.llm import CLOSE_SCHEMA, CREATE_SCHEMA, UPDATE_SCHEMA, run_llm
+from meeting_copilot.feedback import write_feedback_report
 from meeting_copilot.session import create_session, apply_update, write_close_summary
 from meeting_copilot.translate import translate_lines
 
@@ -23,15 +24,33 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 0
 
     config = load_config(Path(args.config) if args.config else DEFAULT_CONFIG)
+    from datetime import datetime
+
+    from meeting_copilot.live.copilot_engine import CopilotBrain
     from meeting_copilot.live.pipeline import LivePipeline, LiveSegment
     from meeting_copilot.live.server import LiveHub, run_live_server
+    from meeting_copilot.feedback import write_feedback_report
+
+    session_dir = Path(args.session) if args.session else (
+        PACKAGE_ROOT / "sessions" / f"live-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}"
+    )
+    state_dir = session_dir / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = state_dir / "live_transcript.txt"
 
     hub = LiveHub()
+    brain = CopilotBrain(
+        config,
+        context_dir=args.context_dir,
+        on_event=hub.publish,
+    )
+    hub.brain = brain
     server = run_live_server(hub, args.host, args.port)
 
     def on_segment(seg: LiveSegment) -> None:
         hub.publish(
             {
+                "type": "segment",
                 "text": seg.text,
                 "translated": seg.translated,
                 "lang": seg.lang,
@@ -41,6 +60,9 @@ def cmd_live(args: argparse.Namespace) -> int:
             }
         )
         if not seg.partial:
+            with transcript_path.open("a", encoding="utf-8") as fh:
+                fh.write(f"[{seg.lang}] {seg.text}\n")
+            brain.on_final_segment(seg.text, seg.translated, seg.lang)
             print(f"[{seg.lang}] {seg.text}")
             print(f"[{seg.target_lang}] {seg.translated}\n")
 
@@ -54,9 +76,11 @@ def cmd_live(args: argparse.Namespace) -> int:
         on_segment=on_segment,
     )
 
-    print(f"실시간 대면 번역: http://{args.host}:{args.port}")
-    print(f"언어: {args.from_lang} ↔ {args.to_lang} (자동 감지)")
-    print("종료: Ctrl+C")
+    print("Meeting Copilot (Smooth-style, local)")
+    print(f"UI: http://{args.host}:{args.port}  ← 작은 창으로 고정해 두세요")
+    print(f"Session: {session_dir}")
+    print(f"Languages: {args.from_lang} ↔ {args.to_lang}")
+    print("종료: Ctrl+C → feedback.md 생성")
     pipeline.start()
     try:
         while True:
@@ -65,7 +89,11 @@ def cmd_live(args: argparse.Namespace) -> int:
         print("\n종료 중…")
     finally:
         pipeline.stop()
+        brain.shutdown()
         server.shutdown()
+        if not args.no_feedback_on_exit:
+            out = write_feedback_report(session_dir, config, args.context_dir)
+            print(f"feedback: {out}")
     return 0
 
 
@@ -248,9 +276,22 @@ def build_parser() -> argparse.ArgumentParser:
     live.add_argument("--chunk-seconds", type=float, default=1.2, help="Audio window size (seconds)")
     live.add_argument("--list-devices", action="store_true", help="List audio input devices and exit")
     live.add_argument("--device", type=int, default=None, help="Input device index")
+    live.add_argument("--session", default=None, help="Save transcript/feedback here")
+    live.add_argument("--no-feedback-on-exit", action="store_true", help="Skip feedback.md on exit")
     live.set_defaults(func=cmd_live)
 
+    feedback = sub.add_parser("feedback", help="Smooth-style post-meeting English coaching report")
+    feedback.add_argument("--session", required=True)
+    feedback.set_defaults(func=cmd_feedback)
+
     return p
+
+
+def cmd_feedback(args: argparse.Namespace) -> int:
+    config = load_config(Path(args.config) if args.config else DEFAULT_CONFIG)
+    out = write_feedback_report(Path(args.session), config, args.context_dir)
+    print(f"feedback: {out}")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

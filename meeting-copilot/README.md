@@ -1,84 +1,55 @@
-# Meeting Copilot (Local Mac, 무료 우선)
+# Meeting Copilot — Smooth AI–style local alternative
 
-로컬 Mac **대면 실시간 번역** + 회의 copilot (맥락 LLM, 제안).
+[Smooth AI](https://www.trysmooth.ai)처럼 **비원어민 영어 회의**를 돕는 로컬 copilot. 무료·로컬·ontology 주입.
 
-| 기능 | 구현 |
+## Smooth AI vs 이 프로젝트
+
+| Smooth AI | Meeting Copilot (local) |
 | --- | --- |
-| **실시간 대면 번역** | 마이크 → faster-whisper → Marian/NLLB 즉시 번역 → 브라우저 UI |
-| 전사 (회의 후처리) | 오디오 파일 STT, Teams 자막 파일 (비실시간) |
-| 맥락 LLM | ontology.json + memory.md → CLI LLM |
-| 실시간 제안 | 전사 델타 → questions/decisions/followups |
+| 실시간 전사·번역 | ✅ `live` — Whisper + Marian/NLLB |
+| 실시간 요약 (Brief) | ✅ Brief 탭 — LLM |
+| 질문 시 답변 제안 | ✅ Suggested reply |
+| Compose (Agree/Disagree/…) | ✅ 상단 칩 + Compose 탭 |
+| 회의 후 영어 피드백 | ✅ `feedback.md` |
+| 화면 플로팅 오버레이 | ⚠️ 브라우저 작은 창 고정 (네이티브 앱은 Tauri 단계) |
+| Zoom/Teams 시스템 오디오 | ⚠️ BlackHole + 마이크 (설정 필요) |
+| 클라우드 SaaS | ✅ 100% 로컬 + CLI LLM |
 
-## 실시간 대면 번역 (핵심)
-
-맥북 마이크로 말하면 **1~2초 내** 원문·번역이 브라우저에 표시됩니다. 양방향(한↔영 등) 자동 감지.
+## 시작 (Smooth와 같은 사용법)
 
 ```bash
 cd meeting-copilot
-python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[live]"
-
-# 마이크 권한: 시스템 설정 → 개인정보 → 마이크 → Terminal 허용
-python -m meeting_copilot live --from-lang ko --to-lang en
-# → http://127.0.0.1:8765 열기 (폰/태블릿도 같은 Wi‑Fi에서 접속 가능)
-```
-
-**지연 줄이기 (Mac CPU):**
-
-```bash
-python -m meeting_copilot live --from-lang ko --to-lang en \
-  --whisper-model tiny --chunk-seconds 0.9
-```
-
-**마이크 선택:**
-
-```bash
-python -m meeting_copilot live --list-devices
-python -m meeting_copilot live --device 1 --from-lang ko --to-lang en
-```
-
-| 언어 쌍 | 번역 엔진 | 비고 |
-| --- | --- | --- |
-| en↔ko, en↔ja 등 | MarianMT (빠름) | 대면 통역에 적합 |
-| 기타 | NLLB-200 (느림) | 첫 로드 후 캐시 |
-
-첫 실행 시 Whisper·번역 모델 다운로드 (~500MB–1.5GB). 이후 **완전 오프라인·$0**.
-
----
-
-## 회의 copilot (맥락 + 제안)
-
-ontology/memory를 채운 뒤 세션 생성:
-
-```bash
-pip install -e .
 cp config.example.yaml config.yaml
-cp context/ontology.example.json context/ontology.json
-cp context/memory.example.md context/memory.md
+# llm.provider: claude | codex | grok
 
-python -m meeting_copilot create --title "Discovery" --type discovery
+python -m meeting_copilot live --from-lang ko --to-lang en
 ```
 
-`config.yaml`에서 `llm.provider: claude | codex | grok`.
+1. **http://127.0.0.1:8765** 를 작은 창으로 띄우고 회의 옆에 고정
+2. **Live** — 실시간 전사·번역·질문 답변 제안
+3. **Brief** — 실시간 요약
+4. **Agree / Disagree / Question / Suggestion** — 즉시 말할 영어 문장
+5. `Ctrl+C` → `sessions/live-*/feedback.md` (영어 교정·표현 학습)
 
----
+## 맥락 주입 (차별점)
 
-## Teams / 파일 기반 (비실시간 보조)
+- `context/ontology.json` — 도메인 엔티티·용어
+- `context/memory.md` — 사전 브리핑
 
-Teams 자막 파일 감시는 **온라인 회의 요약용**이며 대면 실시간 번역과 다릅니다.
+Brief·답변·Compose에 자동 반영.
 
-```bash
-python -m meeting_copilot watch --session <dir> --captions-file state/captions.log
-```
+## Zoom/Teams 오디오
 
----
+1. [BlackHole](https://existential.audio/blackhole/) 설치
+2. Multi-Output으로 시스템 오디오 + 마이크 믹스
+3. `python -m meeting_copilot live --list-devices`
 
-## 비용
+## 다음 단계 (Smooth 완전 동등)
 
-| 구성요소 | 비용 |
-| --- | --- |
-| `live` (마이크 STT + 번역) | $0 |
-| CLI LLM (제안/요약) | 구독 한도 내 |
+- Tauri always-on-top 오버레이
+- 시스템 오디오 원클릭
+- 지연 500ms 이하 (GPU + CTranslate2)
 
 ## License
 

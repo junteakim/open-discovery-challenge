@@ -1,11 +1,10 @@
 ---
 name: meeting-copilot
 description: >-
-  Use when preparing for, running, or closing a live meeting on a local Mac with
-  Teams or real-time translation. Triggers on "meeting copilot", "live copilot",
-  Teams meeting, real-time translation, ontology context, or requests to turn
-  transcript chunks into briefing, questions, decisions, and follow-ups. Uses
-  local CLI LLMs (Claude Code, Codex CLI, Grok CLI) with ontology + memory injection.
+  Use when building a Smooth AI–like local meeting copilot on Mac: real-time
+  translation, live brief, suggested replies, compose chips, post-meeting English
+  feedback, with ontology + memory injection. Triggers on Smooth AI, meeting copilot,
+  live translation, non-native English meetings, or ontology context.
 ---
 
 # Meeting Copilot (Local Mac)

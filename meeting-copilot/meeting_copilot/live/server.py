@@ -3,93 +3,159 @@ from __future__ import annotations
 import json
 import queue
 import threading
-import time
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 
-LIVE_HTML = """<!DOCTYPE html>
+from meeting_copilot.live.copilot_engine import CopilotBrain
+
+
+SMOOTH_HTML = """<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>실시간 대면 번역</title>
+  <title>Meeting Copilot</title>
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; background: #0f1115; color: #f2f4f8; }
-    header { padding: 1rem 1.25rem; border-bottom: 1px solid #2a2f3a; }
-    h1 { margin: 0; font-size: 1.25rem; }
-    .meta { color: #9aa3b2; font-size: 0.9rem; margin-top: 0.35rem; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; min-height: calc(100vh - 72px); }
-    .pane { padding: 1rem 1.25rem; overflow-y: auto; }
-    .pane h2 { margin: 0 0 1rem; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9aa3b2; }
-    .pane.left { border-right: 1px solid #2a2f3a; background: #141820; }
-    .pane.right { background: #10141c; }
-    .line { margin-bottom: 1rem; animation: fade 0.2s ease; }
-    .line.partial { opacity: 0.55; }
-    .line .src { font-size: 1.05rem; line-height: 1.45; }
-    .line .tr { font-size: 1.35rem; font-weight: 600; line-height: 1.4; color: #7db3ff; margin-top: 0.35rem; }
-    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 999px; background: #243044; color: #b8c4d9; margin-bottom: 0.35rem; }
-    .status { color: #6dd58c; }
-    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-    @media (max-width: 720px) {
-      .grid { grid-template-columns: 1fr; }
-      .pane.left { border-right: none; border-bottom: 1px solid #2a2f3a; }
-    }
+    :root { --bg:#0c0e12; --card:#151922; --line:#252b38; --text:#eef1f6; --muted:#8b95a8; --accent:#5b8cff; --green:#5dd68a; --warn:#ffcc66; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    .shell { max-width:420px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; border-left:1px solid var(--line); border-right:1px solid var(--line); }
+    header { padding:14px 16px 10px; border-bottom:1px solid var(--line); }
+    h1 { margin:0; font-size:15px; font-weight:600; }
+    .sub { color:var(--muted); font-size:12px; margin-top:4px; }
+    .tabs { display:flex; gap:6px; padding:10px 12px; border-bottom:1px solid var(--line); }
+    .tabs button { flex:1; border:1px solid var(--line); background:transparent; color:var(--muted); border-radius:8px; padding:8px; cursor:pointer; font-size:12px; }
+    .tabs button.active { background:var(--card); color:var(--text); border-color:var(--accent); }
+    .actions { display:flex; flex-wrap:wrap; gap:6px; padding:8px 12px; border-bottom:1px solid var(--line); }
+    .chip { border:1px solid var(--line); background:var(--card); color:var(--text); border-radius:999px; padding:6px 10px; font-size:11px; cursor:pointer; }
+    .chip:hover { border-color:var(--accent); }
+    main { flex:1; overflow:auto; padding:12px; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .line { margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid var(--line); }
+    .line.partial { opacity:.5; }
+    .src { font-size:13px; line-height:1.45; }
+    .tr { font-size:15px; font-weight:600; color:var(--accent); margin-top:4px; line-height:1.4; }
+    .badge { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+    .card h3 { margin:0 0 8px; font-size:12px; color:var(--muted); text-transform:uppercase; }
+    .card p { margin:0; font-size:14px; line-height:1.5; white-space:pre-wrap; }
+    .card .native { margin-top:8px; color:var(--green); font-size:13px; }
+    .highlight { display:inline-block; background:#24304a; color:#b8d0ff; border-radius:6px; padding:2px 6px; margin:2px 4px 2px 0; font-size:11px; }
+    .suggestion { border-color:var(--warn); }
+    footer { padding:8px 12px; border-top:1px solid var(--line); font-size:11px; color:var(--muted); }
+    .status { color:var(--green); }
   </style>
 </head>
 <body>
-  <header>
-    <h1>실시간 대면 번역</h1>
-    <div class="meta">마이크 → STT → 즉시 번역 · <span id="status" class="status">연결 중…</span></div>
-  </header>
-  <div class="grid">
-    <section class="pane left"><h2>원문</h2><div id="source"></div></section>
-    <section class="pane right"><h2>번역</h2><div id="target"></div></section>
+  <div class="shell">
+    <header>
+      <h1>Meeting Copilot</h1>
+      <div class="sub">Smooth-style · local · <span id="status" class="status">connecting…</span></div>
+    </header>
+    <nav class="tabs">
+      <button type="button" data-tab="live" class="active">Live</button>
+      <button type="button" data-tab="brief">Brief</button>
+      <button type="button" data-tab="compose">Compose</button>
+    </nav>
+    <div class="actions">
+      <button class="chip" data-compose="agree">Agree</button>
+      <button class="chip" data-compose="disagree">Disagree</button>
+      <button class="chip" data-compose="question">Question</button>
+      <button class="chip" data-compose="suggestion">Suggestion</button>
+    </div>
+    <main>
+      <section id="live" class="panel active">
+        <div id="suggestion-card" class="card suggestion" style="display:none">
+          <h3>Suggested reply</h3>
+          <p id="suggestion-text"></p>
+          <p id="suggestion-native" class="native"></p>
+        </div>
+        <div id="feed"></div>
+      </section>
+      <section id="brief" class="panel">
+        <div class="card"><h3>Live summary</h3><p id="brief-text">Generating first summary…</p></div>
+        <div id="highlights"></div>
+      </section>
+      <section id="compose" class="panel">
+        <div class="card"><h3>Compose</h3><p id="compose-text">Tap Agree / Disagree / Question / Suggestion above.</p><p id="compose-native" class="native"></p></div>
+      </section>
+    </main>
+    <footer>Pin this window on your Mac · ontology + memory injected · audio not stored</footer>
   </div>
   <script>
-    const source = document.getElementById('source');
-    const target = document.getElementById('target');
+    const feed = document.getElementById('feed');
     const statusEl = document.getElementById('status');
-    let partialNode = null;
+    let partialEl = null;
 
-    function upsertLine(container, text, lang, partial) {
+    document.querySelectorAll('.tabs button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    document.querySelectorAll('[data-compose]').forEach(chip => {
+      chip.addEventListener('click', async () => {
+        await fetch('/compose', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({mode: chip.dataset.compose}),
+        });
+        document.querySelector('[data-tab="compose"]').click();
+      });
+    });
+
+    function addLine(text, translated, partial) {
       if (partial) {
-        if (!partialNode) {
-          partialNode = document.createElement('div');
-          partialNode.className = 'line partial';
-          partialNode.innerHTML = `<div class="badge">${lang}</div><div class="src"></div>`;
-          container.prepend(partialNode);
+        if (!partialEl) {
+          partialEl = document.createElement('div');
+          partialEl.className = 'line partial';
+          partialEl.innerHTML = '<div class="badge">live</div><div class="src"></div><div class="tr"></div>';
+          feed.prepend(partialEl);
         }
-        partialNode.querySelector('.src').textContent = text;
+        partialEl.querySelector('.src').textContent = text;
+        partialEl.querySelector('.tr').textContent = translated;
         return;
       }
-      partialNode = null;
+      partialEl = null;
       const el = document.createElement('div');
       el.className = 'line';
-      el.innerHTML = `<div class="badge">${lang}</div><div class="src"></div>`;
+      el.innerHTML = '<div class="badge">final</div><div class="src"></div><div class="tr"></div>';
       el.querySelector('.src').textContent = text;
-      container.prepend(el);
-    }
-
-    function addTranslation(text, lang) {
-      const el = document.createElement('div');
-      el.className = 'line';
-      el.innerHTML = `<div class="badge">${lang}</div><div class="tr"></div>`;
-      el.querySelector('.tr').textContent = text;
-      target.prepend(el);
+      el.querySelector('.tr').textContent = translated;
+      feed.prepend(el);
     }
 
     const es = new EventSource('/stream');
-    es.onopen = () => { statusEl.textContent = '실시간 수신 중'; };
-    es.onerror = () => { statusEl.textContent = '연결 끊김 — 새로고침'; };
+    es.onopen = () => { statusEl.textContent = 'live'; };
+    es.onerror = () => { statusEl.textContent = 'reconnect…'; };
     es.onmessage = (ev) => {
-      const seg = JSON.parse(ev.data);
-      if (seg.partial) {
-        upsertLine(source, seg.text, seg.lang, true);
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'segment') {
+        addLine(msg.text, msg.translated, msg.partial);
         return;
       }
-      upsertLine(source, seg.text, seg.lang, false);
-      addTranslation(seg.translated, seg.target_lang);
+      if (msg.type === 'brief') {
+        document.getElementById('brief-text').textContent = msg.brief || '';
+        const hl = document.getElementById('highlights');
+        hl.innerHTML = (msg.highlights || []).map(h => `<span class="highlight">${h}</span>`).join('');
+        return;
+      }
+      if (msg.type === 'suggestion') {
+        const card = document.getElementById('suggestion-card');
+        card.style.display = 'block';
+        document.getElementById('suggestion-text').textContent = msg.reply;
+        document.getElementById('suggestion-native').textContent = msg.reply_native || '';
+        return;
+      }
+      if (msg.type === 'compose') {
+        document.getElementById('compose-text').textContent = msg.reply;
+        document.getElementById('compose-native').textContent = msg.reply_native || '';
+      }
     };
   </script>
 </body>
@@ -97,13 +163,14 @@ LIVE_HTML = """<!DOCTYPE html>
 """
 
 
+@dataclass
 class LiveHub:
-    def __init__(self) -> None:
-        self._clients: list[queue.Queue[str]] = []
-        self._lock = threading.Lock()
+    _clients: list[queue.Queue[str]] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    brain: CopilotBrain | None = None
 
     def subscribe(self) -> queue.Queue[str]:
-        q: queue.Queue[str] = queue.Queue(maxsize=256)
+        q: queue.Queue[str] = queue.Queue(maxsize=512)
         with self._lock:
             self._clients.append(q)
         return q
@@ -131,9 +198,17 @@ def make_handler(hub: LiveHub):
         def log_message(self, _fmt, *_args) -> None:
             return
 
+        def _read_json_body(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            try:
+                return json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                return {}
+
         def do_GET(self) -> None:
             if self.path in ("/", "/index.html"):
-                body = LIVE_HTML.encode("utf-8")
+                body = SMOOTH_HTML.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -167,6 +242,18 @@ def make_handler(hub: LiveHub):
                     hub.unsubscribe(q)
                 return
 
+            self.send_error(404)
+
+        def do_POST(self) -> None:
+            if self.path == "/compose":
+                body = self._read_json_body()
+                mode = str(body.get("mode", "suggestion"))
+                utterance = body.get("utterance")
+                if hub.brain:
+                    hub.brain.compose(mode, utterance)
+                self.send_response(204)
+                self.end_headers()
+                return
             self.send_error(404)
 
     return Handler
