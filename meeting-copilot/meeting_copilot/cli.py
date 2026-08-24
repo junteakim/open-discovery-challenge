@@ -64,7 +64,7 @@ def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
         on_event=hub.publish,
     )
     hub.brain = brain
-    server = run_live_server(hub, args.host, args.port)
+    server = run_live_server(hub, args.host, args.port, context_dir=args.context_dir)
     url = f"http://{args.host}:{args.port}"
 
     def on_segment(seg: LiveSegment) -> None:
@@ -96,8 +96,9 @@ def _run_live_session(args: argparse.Namespace, *, use_overlay: bool) -> int:
         on_segment=on_segment,
     )
 
+    print("Flow — Meeting Copilot (Smooth-style, local)")
     live_mode = config.get("live", {}).get("mode", "lite")
-    print(f"Mode: {live_mode} (lite = $0 during meeting, no LLM calls)")
+    print(f"Mode: {live_mode} (lite = $0 during meeting)")
     if use_overlay:
         print("Always-on-top overlay window")
     else:

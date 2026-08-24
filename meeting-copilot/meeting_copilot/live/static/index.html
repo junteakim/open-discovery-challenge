@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flow — Meeting Copilot</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app" data-state="connecting">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">◉</span>
+        <div>
+          <h1>Flow</h1>
+          <p class="tagline">영어 회의, 실시간으로 따라잡기</p>
+        </div>
+      </div>
+      <div class="status-pill" id="status-pill">
+        <span class="dot"></span>
+        <span id="status-text">연결 중</span>
+      </div>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab active" data-tab="live" role="tab">Live</button>
+      <button type="button" class="tab" data-tab="brief" role="tab">Brief</button>
+      <button type="button" class="tab" data-tab="compose" role="tab">Compose</button>
+    </nav>
+
+    <div class="compose-bar">
+      <button type="button" class="chip" data-compose="agree">Agree</button>
+      <button type="button" class="chip" data-compose="disagree">Disagree</button>
+      <button type="button" class="chip" data-compose="question">Question</button>
+      <button type="button" class="chip" data-compose="suggestion">Suggestion</button>
+    </div>
+
+    <main>
+      <section id="panel-live" class="panel active" role="tabpanel">
+        <div id="suggestion-card" class="card suggestion hidden">
+          <div class="card-head">
+            <span class="label">💬 바로 말할 답변</span>
+            <button type="button" class="icon-btn" data-copy="suggestion-text" title="복사">⎘</button>
+          </div>
+          <p id="suggestion-text" class="say-en"></p>
+          <p id="suggestion-native" class="say-native"></p>
+        </div>
+
+        <div class="search-wrap">
+          <input type="search" id="search" placeholder="전사 검색…" autocomplete="off" />
+        </div>
+
+        <div id="feed" class="feed" aria-live="polite"></div>
+        <p id="feed-empty" class="empty">말하기 시작하면 여기에 전사·번역이 표시됩니다</p>
+      </section>
+
+      <section id="panel-brief" class="panel" role="tabpanel">
+        <div class="card">
+          <div class="card-head">
+            <span class="label">📋 실시간 요약</span>
+          </div>
+          <p id="brief-text" class="brief-body">Generating first summary…</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="label">🔑 핵심 용어</span></div>
+          <div id="highlights" class="chips"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="label">📚 온톨로지 용어</span></div>
+          <div id="glossary" class="glossary"></div>
+        </div>
+      </section>
+
+      <section id="panel-compose" class="panel" role="tabpanel">
+        <div class="card">
+          <div class="card-head">
+            <span class="label">✍️ Compose</span>
+            <button type="button" class="icon-btn" data-copy="compose-text" title="복사">⎘</button>
+          </div>
+          <p id="compose-text" class="say-en">위 Agree / Disagree / Question / Suggestion을 눌러 보세요.</p>
+          <p id="compose-native" class="say-native"></p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span>로컬 · 오디오 미저장</span>
+      <span id="line-count">0 lines</span>
+    </footer>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

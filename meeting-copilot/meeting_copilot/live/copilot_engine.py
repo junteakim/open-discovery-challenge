@@ -134,7 +134,7 @@ class CopilotBrain:
         if self._lite:
             with self._lock:
                 lines = list(self._state.transcript_lines)
-            brief, highlights = heuristic_brief(lines)
+            brief, highlights = heuristic_brief(lines, self._context_dir)
         else:
             prompt = (
                 f"Live meeting transcript so far:\n{self.transcript_text()[-6000:]}\n\n"

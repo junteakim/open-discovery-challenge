@@ -21,7 +21,7 @@ def open_overlay_window(
         ) from exc
 
     window = webview.create_window(
-        "Meeting Copilot",
+        "Flow — Meeting Copilot",
         url,
         width=width,
         height=height,

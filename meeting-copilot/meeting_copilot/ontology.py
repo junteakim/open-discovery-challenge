@@ -17,6 +17,46 @@ def normalize_ontology(raw: dict[str, Any]) -> dict[str, Any]:
     return {"format": "plain", **raw}
 
 
+def glossary_for_ui(context_dir: str | None = None) -> list[dict[str, Any]]:
+    from meeting_copilot.config import CONTEXT_DIR, load_ontology
+
+    base = Path(context_dir) if context_dir else CONTEXT_DIR
+    raw = load_ontology(base)
+    norm = normalize_ontology(raw)
+    items: list[dict[str, Any]] = []
+
+    for key, val in (norm.get("terms") or {}).items():
+        items.append({"term": key, "definition": str(val), "aliases": []})
+
+    for ent in norm.get("entities") or []:
+        if not isinstance(ent, dict):
+            continue
+        labels = ent.get("labels", {})
+        aliases: list[str] = []
+        primary = ent.get("id", "")
+        if isinstance(labels, dict):
+            aliases = list(labels.values())
+            primary = labels.get("en") or (aliases[0] if aliases else primary)
+        facts = ent.get("facts") or []
+        definition = facts[0] if facts else ent.get("description", "")
+        items.append({"term": str(primary), "definition": str(definition), "aliases": aliases})
+
+    return items
+
+
+def extract_matched_terms(text: str, context_dir: str | None = None) -> list[str]:
+    """Terms from ontology that appear in transcript text."""
+    glossary = glossary_for_ui(context_dir)
+    lower = text.lower()
+    matched: list[str] = []
+    for item in glossary:
+        candidates = [item["term"], *item.get("aliases", [])]
+        for c in candidates:
+            if c and c.lower() in lower and c not in matched:
+                matched.append(c)
+    return matched
+
+
 def ontology_prompt_block(raw: dict[str, Any], max_entities: int = 24) -> str:
     """Compact ontology for LLM prompts (token-efficient)."""
     if not raw:
