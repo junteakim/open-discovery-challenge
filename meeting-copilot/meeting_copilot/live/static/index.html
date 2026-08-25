@@ -37,10 +37,20 @@
 
     <main>
       <section id="panel-live" class="panel active" role="tabpanel">
+        <div id="mention-banner" class="mention-banner hidden" role="alert">
+          <strong id="mention-title">호출됨</strong>
+          <span id="mention-text"></span>
+        </div>
+
         <div id="suggestion-card" class="card suggestion hidden">
           <div class="card-head">
             <span class="label">💬 바로 말할 답변</span>
             <button type="button" class="icon-btn" data-copy="suggestion-text" title="복사">⎘</button>
+          </div>
+          <div id="strategy-tabs" class="strategy-tabs hidden">
+            <button type="button" class="strategy active" data-strategy="diplomatic">Diplomatic</button>
+            <button type="button" class="strategy" data-strategy="assertive">Assertive</button>
+            <button type="button" class="strategy" data-strategy="conservative">Conservative</button>
           </div>
           <p id="suggestion-text" class="say-en"></p>
           <p id="suggestion-native" class="say-native"></p>

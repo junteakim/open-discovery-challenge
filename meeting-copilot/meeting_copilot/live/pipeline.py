@@ -9,6 +9,7 @@ from typing import Any, Callable
 import numpy as np
 
 from meeting_copilot.live.device import resolve_whisper_runtime
+from meeting_copilot.live.hallucinations import looks_like_hallucination
 
 SAMPLE_RATE = 16000
 
@@ -178,11 +179,14 @@ class LivePipeline:
                 text = " ".join(s.text.strip() for s in segments).strip()
                 if not text or text == last_text:
                     continue
+                if looks_like_hallucination(text):
+                    continue
 
                 detected = info.language or self._lang_a_whisper
                 tgt = self._target_for(detected)
                 last_text = text
 
+                # Show STT immediately (lower perceived latency)
                 self._emit(
                     LiveSegment(
                         text=text,

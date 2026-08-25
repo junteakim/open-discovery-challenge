@@ -15,8 +15,9 @@ from meeting_copilot.llm import (
 from meeting_copilot.live.lite_copilot import (
     heuristic_brief,
     heuristic_compose,
-    heuristic_reply,
+    heuristic_reply_strategies,
 )
+from meeting_copilot.live.mention import detect_mention
 
 QUESTION_RE = re.compile(
     r"(\?|^(could|can|would|will|what|why|how|when|where|who|do you|did you|is there|are we)\b)",
@@ -64,6 +65,7 @@ class CopilotBrain:
             1,
             brief_every_n or int(live.get("brief_every_n", 5 if self._lite else 3)),
         )
+        self._my_names = [str(n) for n in live.get("my_names", []) if n]
         self._lock = threading.Lock()
         self._pool = ThreadPoolExecutor(max_workers=1)
         self._segment_count = 0
@@ -93,6 +95,17 @@ class CopilotBrain:
         if looks_like_question(text):
             self._pool.submit(self._suggest_reply, text, translated)
 
+        mention = detect_mention(text, names=self._my_names)
+        if mention:
+            self._emit(
+                {
+                    "type": "mention",
+                    "kind": mention.kind,
+                    "matched": mention.matched,
+                    "text": text,
+                }
+            )
+
         if count == 1 or count % self._brief_every_n == 0:
             self._pool.submit(self._update_brief)
 
@@ -101,21 +114,36 @@ class CopilotBrain:
 
     def _suggest_reply(self, question: str, translated: str) -> None:
         if self._lite:
-            reply, native = heuristic_reply(question, translated, self._context_dir)
-        else:
-            prompt = (
-                f"A meeting participant asked or said:\n{question}\n\n"
-                f"Translation hint: {translated}\n\n"
-                f"Recent transcript:\n{self.transcript_text()[-3000:]}\n\n"
-                f"{SMOOTH_REPLY_SCHEMA}"
-            )
-            try:
-                data = run_llm(prompt, self._config, self._context_dir)
-                reply = data.get("reply") or data.get("raw", "")
-                native = data.get("reply_native", reply)
-            except Exception as exc:
-                reply = f"(LLM unavailable: {exc})"
-                native = reply
+            strategies = heuristic_reply_strategies(question, translated, self._context_dir)
+            reply, native = strategies["diplomatic"]
+            payload = {
+                "type": "suggestion",
+                "question": question,
+                "reply": reply,
+                "reply_native": native,
+                "strategies": {
+                    k: {"reply": v[0], "reply_native": v[1]} for k, v in strategies.items()
+                },
+            }
+            with self._lock:
+                self._state.last_suggestion = reply
+                self._state.last_suggestion_native = native
+            self._emit(payload)
+            return
+
+        prompt = (
+            f"A meeting participant asked or said:\n{question}\n\n"
+            f"Translation hint: {translated}\n\n"
+            f"Recent transcript:\n{self.transcript_text()[-3000:]}\n\n"
+            f"{SMOOTH_REPLY_SCHEMA}"
+        )
+        try:
+            data = run_llm(prompt, self._config, self._context_dir)
+            reply = data.get("reply") or data.get("raw", "")
+            native = data.get("reply_native", reply)
+        except Exception as exc:
+            reply = f"(LLM unavailable: {exc})"
+            native = reply
 
         with self._lock:
             self._state.last_suggestion = reply

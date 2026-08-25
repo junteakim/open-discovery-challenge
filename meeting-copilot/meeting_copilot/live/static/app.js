@@ -8,6 +8,7 @@
   let partialEl = null;
   let allLines = [];
   let glossaryTerms = [];
+  let currentStrategies = null;
 
   // Tabs
   document.querySelectorAll(".tab").forEach((btn) => {
@@ -16,6 +17,20 @@
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       btn.classList.add("active");
       document.getElementById(`panel-${btn.dataset.tab}`).classList.add("active");
+    });
+  });
+
+  // Strategy tabs (MeetU-style 3 replies)
+  document.querySelectorAll(".strategy").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!currentStrategies) return;
+      document.querySelectorAll(".strategy").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const s = currentStrategies[btn.dataset.strategy];
+      if (s) {
+        document.getElementById("suggestion-text").innerHTML = highlightTerms(s.reply);
+        document.getElementById("suggestion-native").textContent = s.reply_native || "";
+      }
     });
   });
 
@@ -101,12 +116,31 @@
     lineCount.textContent = `${allLines.length} lines`;
   }
 
-  function showSuggestion(reply, native) {
+  function showSuggestion(msg) {
     const card = document.getElementById("suggestion-card");
+    const tabs = document.getElementById("strategy-tabs");
     card.classList.remove("hidden");
-    document.getElementById("suggestion-text").innerHTML = highlightTerms(reply);
-    document.getElementById("suggestion-native").textContent = native || "";
+    currentStrategies = msg.strategies || null;
+    if (currentStrategies) {
+      tabs.classList.remove("hidden");
+      document.querySelectorAll(".strategy").forEach((b) => {
+        b.classList.toggle("active", b.dataset.strategy === "diplomatic");
+      });
+    } else {
+      tabs.classList.add("hidden");
+    }
+    document.getElementById("suggestion-text").innerHTML = highlightTerms(msg.reply);
+    document.getElementById("suggestion-native").textContent = msg.reply_native || "";
     card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function showMention(msg) {
+    const banner = document.getElementById("mention-banner");
+    const titles = { name: "이름 호출", question: "질문 감지", request: "요청 감지" };
+    document.getElementById("mention-title").textContent = titles[msg.kind] || "알림";
+    document.getElementById("mention-text").textContent = msg.text || "";
+    banner.classList.remove("hidden");
+    setTimeout(() => banner.classList.add("hidden"), 8000);
   }
 
   function renderGlossary(items) {
@@ -150,7 +184,11 @@
       return;
     }
     if (msg.type === "suggestion") {
-      showSuggestion(msg.reply, msg.reply_native);
+      showSuggestion(msg);
+      return;
+    }
+    if (msg.type === "mention") {
+      showMention(msg);
       return;
     }
     if (msg.type === "compose") {

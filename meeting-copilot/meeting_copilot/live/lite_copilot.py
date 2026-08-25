@@ -5,7 +5,52 @@ from typing import Any
 
 from meeting_copilot.ontology import extract_matched_terms, glossary_for_ui
 
-# Natural English phrase chips — Smooth-style ready-to-say lines
+# MeetU-style: 3 reply strategies (conservative / assertive / diplomatic)
+REPLY_STRATEGIES: dict[str, dict[str, tuple[str, str]]] = {
+    "default": {
+        "conservative": (
+            "That's a fair point. Let me think it through and follow up shortly.",
+            "I'd like a moment to consider that carefully before I respond.",
+        ),
+        "assertive": (
+            "Here's my take: we should move forward with a clear next step.",
+            "I recommend we decide now and assign an owner today.",
+        ),
+        "diplomatic": (
+            "I hear you. Maybe we can find a middle ground that works for both sides.",
+            "Appreciate the perspective — let's align on a path that works for everyone.",
+        ),
+    },
+    "timeline": {
+        "conservative": (
+            "On timing — I want to confirm dependencies before I commit.",
+            "Let me double-check capacity and get back with a firm date.",
+        ),
+        "assertive": (
+            "We can deliver by next Friday if scope stays as discussed.",
+            "Next Friday works on our end — let's lock that in.",
+        ),
+        "diplomatic": (
+            "If we prioritize the core items, next Friday is realistic; stretch goals may slip.",
+            "We can hit the critical path by Friday and phase the rest.",
+        ),
+    },
+    "budget": {
+        "conservative": (
+            "On budget — I'll share a range after I check with the team.",
+            "I want to confirm numbers internally before I quote anything firm.",
+        ),
+        "assertive": (
+            "The budget we had in mind is X; happy to walk through the breakdown.",
+            "We're prepared to discuss pricing based on the scope we outlined.",
+        ),
+        "diplomatic": (
+            "There's flexibility depending on scope — let's align on must-haves first.",
+            "Happy to explore options that fit both budget and outcomes.",
+        ),
+    },
+}
+
 COMPOSE_TEMPLATES: dict[str, tuple[str, str]] = {
     "agree": (
         "I agree with that approach.",
@@ -25,29 +70,13 @@ COMPOSE_TEMPLATES: dict[str, tuple[str, str]] = {
     ),
 }
 
-QUESTION_PATTERNS: list[tuple[re.Pattern[str], tuple[str, str]]] = [
-    (re.compile(r"timeline|deadline|when", re.I), (
-        "Regarding the timeline — we can target next Friday if that works.",
-        "On timing — I think next Friday is realistic on our end.",
-    )),
-    (re.compile(r"budget|cost|price", re.I), (
-        "On budget — let me share what we had in mind.",
-        "Happy to walk through the numbers with you.",
-    )),
-    (re.compile(r"why|reason", re.I), (
-        "The main reason is we want to reduce risk before scaling.",
-        "Primarily, we're trying to de-risk before we commit further.",
-    )),
-    (re.compile(r"how|process", re.I), (
-        "Here's how we'd approach it step by step.",
-        "Let me outline the process we'd follow.",
-    )),
-]
 
-QUESTION_REPLY_DEFAULT: tuple[str, str] = (
-    "That's a great question — let me address it directly.",
-    "Good question. Here's how I see it.",
-)
+def _topic_key(question: str) -> str:
+    if re.search(r"timeline|deadline|when|schedule", question, re.I):
+        return "timeline"
+    if re.search(r"budget|cost|price|pricing", question, re.I):
+        return "budget"
+    return "default"
 
 
 def heuristic_compose(mode: str, context_dir: str | None) -> tuple[str, str]:
@@ -60,18 +89,27 @@ def heuristic_compose(mode: str, context_dir: str | None) -> tuple[str, str]:
 
 
 def heuristic_reply(question: str, translated: str, context_dir: str | None) -> tuple[str, str]:
-    for pattern, pair in QUESTION_PATTERNS:
-        if pattern.search(question):
-            reply, native = pair
-            break
-    else:
-        reply, native = QUESTION_REPLY_DEFAULT
+    """Backward-compatible: returns diplomatic as primary."""
+    strategies = heuristic_reply_strategies(question, translated, context_dir)
+    dip = strategies["diplomatic"]
+    return dip[0], dip[1]
 
+
+def heuristic_reply_strategies(
+    question: str,
+    translated: str,
+    context_dir: str | None,
+) -> dict[str, tuple[str, str]]:
+    """MeetU-style three strategies — zero LLM cost."""
+    topic = _topic_key(question)
+    base = REPLY_STRATEGIES[topic]
     matched = extract_matched_terms(question, context_dir)
-    if matched:
-        native = f"On {matched[0]} — {native}"
-
-    return reply, native
+    out: dict[str, tuple[str, str]] = {}
+    for key, (reply, native) in base.items():
+        if matched:
+            native = f"On {matched[0]} — {native}"
+        out[key] = (reply, native)
+    return out
 
 
 def heuristic_brief(
@@ -83,23 +121,19 @@ def heuristic_brief(
     if not recent:
         return "Generating first summary…", []
 
-    # Smooth-style bullet summary (not raw dump)
-    bullets: list[str] = []
+    bullets = []
     for ln in recent[-5:]:
         short = ln[:100] + ("…" if len(ln) > 100 else "")
         bullets.append(f"• {short}")
-
     brief = "\n".join(bullets)
 
-    # Highlights: ontology matches first, then frequent English words
     highlights: list[str] = []
     combined = " ".join(recent)
     highlights.extend(extract_matched_terms(combined, context_dir))
 
     stop = {"that", "this", "with", "have", "from", "what", "when", "would", "could", "about", "there", "their"}
     for word in re.findall(r"[A-Za-z]{5,}", combined):
-        w = word.lower()
-        if w not in stop and word not in highlights:
+        if word.lower() not in stop and word not in highlights:
             highlights.append(word)
         if len(highlights) >= 8:
             break

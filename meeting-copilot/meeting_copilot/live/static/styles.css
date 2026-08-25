@@ -141,6 +141,41 @@ main { flex: 1; overflow: hidden; display: flex; flex-direction: column; padding
   border-color: rgba(255, 200, 87, 0.45);
   background: linear-gradient(135deg, rgba(255, 200, 87, 0.08), var(--surface));
 }
+
+.mention-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: rgba(255, 123, 156, 0.12);
+  border: 1px solid rgba(255, 123, 156, 0.4);
+  animation: slideIn 0.2s ease;
+}
+.mention-banner strong { font-size: 12px; color: var(--rose); }
+.mention-banner span { font-size: 13px; color: var(--text); }
+
+.strategy-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.strategy {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.strategy.active {
+  color: var(--text);
+  border-color: var(--amber);
+  background: rgba(255, 200, 87, 0.12);
+}
 .card-head {
   display: flex;
   justify-content: space-between;

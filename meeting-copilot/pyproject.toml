@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meeting-copilot"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local Mac meeting copilot with ontology context and free STT/translation"
 readme = "README.md"
 requires-python = ">=3.11"
