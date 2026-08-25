@@ -1,0 +1,47 @@
+# MacBook Air default — zero API cost during meetings, minimum STT latency
+profile: macbook-air
+
+llm:
+  provider: echo
+  claude:
+    command: ["claude", "-p", "--output-format", "text"]
+  codex:
+    command: ["codex", "exec", "--full-auto"]
+  grok:
+    command: ["grok", "-p"]
+
+translation:
+  backend: marian
+
+live:
+  mode: lite
+  whisper_model: tiny
+  chunk_seconds: 0.65
+  whisper_device: cpu
+  whisper_compute_type: int8
+  cpu_threads: 4
+  brief_every_n: 6
+  my_names: []   # e.g. ["Alex", "김준태"] — MeetU-style mention alerts
+
+profiles:
+  macbook-air:
+    live:
+      mode: lite
+      whisper_model: tiny
+      chunk_seconds: 0.65
+      whisper_device: cpu
+      whisper_compute_type: int8
+      cpu_threads: 4
+      brief_every_n: 6
+    translation:
+      backend: marian
+  full:
+    live:
+      mode: full
+      whisper_model: tiny
+      chunk_seconds: 0.85
+      brief_every_n: 3
+    translation:
+      backend: marian
+    llm:
+      provider: claude

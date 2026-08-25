@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meeting-copilot"
+version = "0.5.0"
+description = "Local Mac meeting copilot with ontology context and free STT/translation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+stt = ["faster-whisper>=1.0"]
+translate = ["transformers>=4.40", "sentencepiece>=0.2", "torch"]
+live = [
+    "faster-whisper>=1.0",
+    "sounddevice>=0.4",
+    "numpy>=1.26",
+    "transformers>=4.40",
+    "sentencepiece>=0.2",
+    "torch",
+]
+overlay = [
+    "pywebview>=5.0",
+    "faster-whisper>=1.0",
+    "sounddevice>=0.4",
+    "numpy>=1.26",
+    "transformers>=4.40",
+    "sentencepiece>=0.2",
+    "torch",
+]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+meeting-copilot = "meeting_copilot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["meeting_copilot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
