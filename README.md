@@ -62,3 +62,13 @@ pytest -q
 ## License
 
 MIT — Copyright (c) Juntae Kim
+
+## PipeCAD Web
+
+브라우저용 플랜트 배관 CAD는 [`web/`](./web) 에 있습니다.
+
+```bash
+cd web && npm install && npm run dev
+```
+
+샘플 로그인: `SYSTEM` / `XXXXXX`
