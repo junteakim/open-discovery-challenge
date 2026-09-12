@@ -92,11 +92,11 @@ export function buildIsoSvg(doc: ProjectDoc, rootId?: string): string {
     })
     .join("\n");
 
-  const mto = buildMto(doc, rootId).filter((r) => r.type !== "EQUI" && r.type !== "SCTN").slice(0, 10);
+  const mto = buildMto(doc, rootId).filter((r) => r.type !== "EQUI" && r.type !== "SCTN").slice(0, 8);
   const rows = mto
     .map(
       (r, i) =>
-        `<text x="980" y="${118 + i * 16}" font-size="11" fill="#1c2833">${esc(r.type)}  ${esc(r.bore)}  ${r.qty.toFixed(1)}${r.unit}  ${esc(r.description.slice(0, 28))}</text>`,
+        `<text x="976" y="${136 + i * 18}" font-size="12" font-family="Noto Sans KR, Segoe UI, sans-serif" fill="#1c2833">${esc(r.type.padEnd(5))} ${String(r.bore).padStart(4)}  ${r.qty.toFixed(1).padStart(6)}${r.unit.padEnd(3)}  ${esc(r.description.slice(0, 26))}</text>`,
     )
     .join("\n");
 

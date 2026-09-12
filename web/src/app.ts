@@ -403,7 +403,7 @@ export function startApp(root: HTMLElement) {
       result = routePipe(state.doc, selected ?? undefined, values.name || nextName(state.doc, "P"), pts, Number(values.bore || 80), values.spec || state.doc.spec);
     }
     setDoc(result.doc, { selectedId: result.id, dialog: null, status: `${state.dialog?.title ?? "항목"} 생성` });
-    viewport?.fit(result.doc, result.id);
+    viewport?.fit(result.doc, null);
   }
 
   function finishRoute(selected: TreeItem | null) {

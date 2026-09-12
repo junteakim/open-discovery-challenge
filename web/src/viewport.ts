@@ -23,12 +23,12 @@ export function createViewport(canvas: HTMLCanvasElement): ViewportApi {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0d1520);
-  scene.fog = new THREE.Fog(0x0d1520, 28000, 72000);
+  scene.background = new THREE.Color(0x152233);
+  scene.fog = new THREE.Fog(0x152233, 42000, 90000);
 
   const camera = new THREE.PerspectiveCamera(50, 1, 10, 200000);
   camera.up.set(0, 0, 1);
-  camera.position.set(14000, -12000, 9000);
+  camera.position.set(11000, -9000, 7000);
 
   const controls = new OrbitControls(camera, canvas);
   controls.target.set(6000, 3500, 1500);
@@ -38,8 +38,8 @@ export function createViewport(canvas: HTMLCanvasElement): ViewportApi {
   controls.minDistance = 400;
   controls.maxDistance = 80000;
 
-  scene.add(new THREE.AmbientLight(0x9fb3c8, 0.55));
-  const key = new THREE.DirectionalLight(0xffffff, 1.05);
+  scene.add(new THREE.AmbientLight(0xc5d4e0, 0.85));
+  const key = new THREE.DirectionalLight(0xffffff, 1.15);
   key.position.set(12000, -8000, 18000);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
@@ -58,14 +58,14 @@ export function createViewport(canvas: HTMLCanvasElement): ViewportApi {
   const root = new THREE.Group();
   scene.add(root);
 
-  const grid = new THREE.GridHelper(24000, 24, 0x3d5a73, 0x243447);
+  const grid = new THREE.GridHelper(32000, 32, 0x5d87a3, 0x2d4a60);
   grid.rotation.x = Math.PI / 2;
   grid.position.set(6000, 4000, 0);
   scene.add(grid);
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(48000, 48000),
-    new THREE.MeshStandardMaterial({ color: 0x13202e, roughness: 1, metalness: 0 }),
+    new THREE.MeshStandardMaterial({ color: 0x1a2b3c, roughness: 1, metalness: 0 }),
   );
   ground.position.set(6000, 4000, -2);
   ground.receiveShadow = true;
@@ -144,7 +144,6 @@ export function createViewport(canvas: HTMLCanvasElement): ViewportApi {
       const mesh = buildItemMesh(item, item.id === selectedId);
       if (mesh) root.add(mesh);
     }
-    void childrenOf;
   }
 
   function ndc(clientX: number, clientY: number) {
@@ -191,20 +190,39 @@ export function createViewport(canvas: HTMLCanvasElement): ViewportApi {
 
   function fit(doc: ProjectDoc, id?: string | null) {
     const box = new THREE.Box3();
-    const targetItems = id ? doc.items.filter((it) => it.id === id) : doc.items;
+    const ids = new Set<string>();
+    if (id) {
+      ids.add(id);
+      const walk = (pid: string) => {
+        for (const child of childrenOf(doc, pid)) {
+          ids.add(child.id);
+          walk(child.id);
+        }
+      };
+      walk(id);
+    }
+    const targetItems = id ? doc.items.filter((it) => ids.has(it.id)) : doc.items;
     let any = false;
     for (const item of targetItems) {
       const c = itemCenter(item);
       if (c.length() > 0 || item.props.x !== undefined || item.props.x1 !== undefined) {
         box.expandByPoint(c);
+        const hx = Number(item.props.x2 ?? item.props.lx ?? item.props.diameter ?? 800);
+        const hy = Number(item.props.y2 ?? item.props.ly ?? item.props.diameter ?? 800);
+        const hz = Number(item.props.z2 ?? item.props.lz ?? item.props.height ?? 800);
+        if (item.props.x2 !== undefined) {
+          box.expandByPoint(new THREE.Vector3(Number(item.props.x2), Number(item.props.y2), Number(item.props.z2)));
+        } else {
+          box.expandByPoint(c.clone().add(new THREE.Vector3(Number(hx) / 2, Number(hy) / 2, Number(hz) / 2)));
+        }
         any = true;
       }
     }
     if (!any) return;
     const center = box.getCenter(new THREE.Vector3());
-    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 4000);
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 8000);
     controls.target.copy(center);
-    camera.position.set(center.x + size * 0.9, center.y - size * 0.9, center.z + size * 0.7);
+    camera.position.set(center.x + size * 0.85, center.y - size * 0.85, center.z + size * 0.65);
   }
 
   function setMeasure(result: MeasureResult | null) {

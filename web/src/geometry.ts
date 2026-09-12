@@ -201,8 +201,11 @@ function primitiveMesh(item: TreeItem, selected: boolean): THREE.Object3D | null
       const h = n(item, "height", 250);
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), material);
       mesh.position.set(n(item, "x"), n(item, "y"), n(item, "z"));
-      mesh.scale.y = h / r;
-      if (n(item, "flip")) mesh.rotation.x = Math.PI;
+      mesh.scale.set(1, h / r, 1);
+      mesh.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(0, 0, n(item, "flip") ? -1 : 1),
+      );
       return mesh;
     }
     case "NOZZ": {
@@ -226,12 +229,12 @@ function primitiveMesh(item: TreeItem, selected: boolean): THREE.Object3D | null
       const profile = PROFILES.find((p) => p.name === s(item, "profile")) ?? PROFILES[0];
       const a = v(n(item, "x1"), n(item, "y1"), n(item, "z1"));
       const b = v(n(item, "x2"), n(item, "y2"), n(item, "z2"));
-      const group = new THREE.Group();
-      const web = cylinderBetween(a, b, profile.tw * 0.6, material, 8);
-      group.add(web);
-      const flange = cylinderBetween(a, b, profile.bf * 0.18, material, 8);
-      group.add(flange);
-      return group;
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(profile.bf, 1, profile.d),
+        material,
+      );
+      alignCylinder(mesh, new THREE.Vector3(a.x, a.y, a.z), new THREE.Vector3(b.x, b.y, b.z));
+      return mesh;
     }
     case "PLAT": {
       const mesh = new THREE.Mesh(
