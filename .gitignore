@@ -6,5 +6,7 @@ data/
 *.egg-info/
 dist/
 build/
+web/node_modules/
+web/dist/
 .env
 *.secret
