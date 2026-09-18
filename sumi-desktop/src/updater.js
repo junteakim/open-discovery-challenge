@@ -20,6 +20,8 @@ function setupAutoUpdater({ appName, iconPath, getWindow }) {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.allowPrerelease = false;
   autoUpdater.allowDowngrade = false;
+  // 웹 설치 프로그램은 쓰지 않으므로 전체 설치 파일만 내려받습니다.
+  autoUpdater.disableWebInstaller = true;
   autoUpdater.logger = {
     info: (message) => console.log('[updater]', message),
     warn: (message) => console.warn('[updater]', message),
