@@ -4,17 +4,20 @@
 
 > 웹 서비스 자체는 그대로 사용합니다. 이 폴더는 서버 코드를 바꾸지 않는 **클라이언트 껍데기(wrapper)** 입니다.
 
-## exe 받는 방법
+## 설치 파일 받는 방법
 
-### 1) GitHub Actions에서 내려받기 (권장, 윈도우 PC 없이도 가능)
+### 1) GitHub Releases에서 내려받기 (권장)
 
-1. GitHub 저장소 → **Actions** → **SUMI Desktop (Windows exe)** 워크플로 선택
-2. 최신 실행 결과(또는 **Run workflow** 로 직접 실행) 클릭
-3. 하단 **Artifacts → `SUMI-windows-exe`** 다운로드 후 압축 해제
-   - `SUMI-1.0.0-setup.exe` — 설치 파일 (시작 메뉴·바탕화면 바로가기 생성)
-   - `SUMI-1.0.0-portable.exe` — 설치 없이 바로 실행되는 단일 실행 파일 (USB 사용 가능)
+- 최신 설치 파일: **[sumi-desktop-latest 릴리스](https://github.com/junteakim/open-discovery-challenge/releases/tag/sumi-desktop-latest)** 의 `SUMI-<버전>-setup.exe`
+- 버전별 릴리스: `sumi-desktop-v1.0.1` 처럼 `sumi-desktop-v*` 태그 릴리스
 
-### 2) 윈도우 PC에서 직접 빌드
+설치 후에는 앱이 스스로 업데이트하므로 다시 내려받을 필요가 없습니다.
+
+### 2) GitHub Actions 아티팩트
+
+**Actions → SUMI Desktop (Windows exe)** → 실행 결과 → **Artifacts → `SUMI-windows-setup`** (브랜치 푸시마다 빌드만 하고 게시는 하지 않습니다).
+
+### 3) 윈도우 PC에서 직접 빌드
 
 [Node.js 22 이상](https://nodejs.org/) 설치 후:
 
@@ -24,13 +27,49 @@ npm ci
 npm run build:win
 ```
 
-`sumi-desktop\release\` 폴더에 설치 파일과 포터블 exe가 생성됩니다.
+`sumi-desktop\release\` 에 `SUMI-<버전>-setup.exe`, `.blockmap`, `latest.yml` 이 생성됩니다.
 
-### 3) 리눅스/맥에서 실행 폴더만 확인 (Wine 불필요)
+### 4) 리눅스/맥에서 실행 폴더만 확인 (Wine 불필요)
 
 ```bash
 npm run pack:win:dir   # release/SUMI-win32-x64/SUMI.exe 생성 (설치 파일 아님)
 ```
+
+## 자동 업데이트
+
+설치판(NSIS)은 [electron-updater](https://www.electron.build/auto-update)로 **완전 자동 업데이트**됩니다.
+
+1. 실행 10초 후, 이후 4시간마다 업데이트 채널의 `latest.yml` 을 조회합니다.
+2. 새 버전이 있으면 **백그라운드로 내려받으며** 작업 표시줄에 진행률을 표시하고 한글 알림을 띄웁니다.
+3. 다운로드가 끝나면 **"지금 다시 시작"** 또는 **"나중에"** 를 묻습니다. 나중에를 고르면 앱을 닫을 때(또는 다음 실행 시) 자동으로 교체 설치됩니다.
+4. **도움말 → 업데이트 확인…** 으로 수동 확인도 할 수 있습니다.
+
+### 채널이 앱별로 분리되는 방식
+
+한 저장소에 앱이 두 개(SUMI, SMC DraftLine)라서 electron-updater의 GitHub provider("저장소의 최신 릴리스")는 쓰지 않습니다. 대신 **generic provider + 앱별 고정 태그**를 사용합니다.
+
+| 항목 | 값 |
+|------|----|
+| 업데이트 피드(URL) | `https://github.com/junteakim/open-discovery-challenge/releases/download/sumi-desktop-latest/` |
+| 채널 릴리스(고정 태그) | `sumi-desktop-latest` — CI가 매 릴리스마다 `latest.yml`, `SUMI-<버전>-setup.exe`, `.blockmap` 을 교체 |
+| 버전 릴리스(보관용) | `sumi-desktop-v<버전>` — 같은 자산을 버전별로 보관 |
+
+설정은 `package.json → build.publish` 에 있고, 빌드 시 `resources/app-update.yml` 로 앱에 포함됩니다. 다른 앱(`draftline-desktop-latest`)과 태그·URL이 다르므로 서로 섞이지 않습니다. 기존 프리릴리스 `sumi-desktop-v1.0.0`(포터블)은 그대로 두어도 영향이 없습니다.
+
+## 새 버전 배포 절차
+
+1. `sumi-desktop/package.json` 의 `version` 을 올립니다 (예: `1.0.1` → `1.0.2`). 필요하면 `npm version patch --no-git-tag-version` 을 사용합니다.
+2. 커밋하고 브랜치에 푸시합니다.
+3. **버전과 같은 태그**를 푸시합니다.
+
+   ```bash
+   git tag sumi-desktop-v1.0.2
+   git push origin sumi-desktop-v1.0.2
+   ```
+
+   (또는 Actions에서 **Run workflow** → `publish` 체크. 이 경우 태그는 CI가 만듭니다.)
+4. CI(windows-latest)가 설치 파일을 빌드해 `sumi-desktop-v1.0.2` 릴리스를 만들고, `sumi-desktop-latest` 채널의 자산을 교체합니다. 태그와 `package.json` 버전이 다르면 빌드가 실패합니다.
+5. 설치된 앱들은 다음 확인 주기(최대 4시간, 또는 재실행 10초 후)에 새 버전을 내려받습니다.
 
 ## 개발 중 실행
 
@@ -50,6 +89,7 @@ npm start -- --url=https://다른서버:9443/     # 위와 동일
 | 파일 업로드·다운로드 | 다운로드는 기본적으로 `다운로드` 폴더에 자동 저장(중복 이름 자동 회피), 작업 표시줄 진행률과 완료 알림 제공. 알림을 클릭하면 저장 위치가 열림 |
 | 외부 링크 | SUMI 서버 밖의 링크와 새 창은 기본 브라우저로 열림 |
 | 한글 메뉴 | 파일/편집/보기/이동/설정/도움말 메뉴와 한글 우클릭 메뉴 (메뉴 막대는 `Alt` 로 표시) |
+| 자동 업데이트 | 새 버전을 백그라운드로 내려받아 재시작 시 교체. 아래 [자동 업데이트](#자동-업데이트) 참고 |
 | 단축키 | `Ctrl+R` 새로고침, `Ctrl+Shift+R` 캐시 무시 새로고침, `Ctrl+P` 인쇄, `Ctrl +/-/0` 확대·축소, `Alt+←/→` 뒤로·앞으로, `Alt+Home` 시작 화면, `F11` 전체 화면, `F12` 개발자 도구 |
 | 연결 실패 화면 | 서버에 접속하지 못하면 원인·주소를 보여주고 **다시 시도** / **서버 주소 변경** 가능 |
 | 트레이 상주 | `설정 → 창을 닫으면 트레이로 최소화` 를 켜면 창을 닫아도 백그라운드에서 알림 수신 |
@@ -89,6 +129,7 @@ npm start -- --url=https://다른서버:9443/     # 위와 동일
 sumi-desktop/
 ├── src/
 │   ├── main.js        메인 프로세스(창·메뉴·트레이·세션·탐색 제어)
+│   ├── updater.js     electron-updater 연동(백그라운드 다운로드·한글 알림·재시작 확인)
 │   ├── config.js      설정 저장/불러오기
 │   ├── menu.js        한글 앱 메뉴·우클릭 메뉴
 │   ├── downloads.js   다운로드 자동 저장·진행률·완료 알림

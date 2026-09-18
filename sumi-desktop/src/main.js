@@ -17,6 +17,7 @@ const {
 const config = require('./config');
 const { buildAppMenu, buildContextMenu } = require('./menu');
 const { registerDownloadHandler, openDownloadFolder } = require('./downloads');
+const { setupAutoUpdater } = require('./updater');
 
 const APP_ID = 'com.smc.sumi';
 const ICON_PNG = path.join(__dirname, '..', 'assets', 'smc-icon.png');
@@ -25,6 +26,7 @@ const ERROR_PAGE = path.join(__dirname, 'error.html');
 let mainWindow = null;
 let serverUrlWindow = null;
 let tray = null;
+let updater = null;
 let quitting = false;
 
 function serverOrigin() {
@@ -229,6 +231,7 @@ function showAbout() {
       `Electron: ${process.versions.electron}`,
       `Chromium: ${process.versions.chrome}`,
       `설정 파일: ${config.configPath()}`,
+      `업데이트 채널: ${updater ? updater.feedUrl() : '-'}`,
     ].join('\n'),
     buttons: ['확인'],
     noLink: true,
@@ -252,6 +255,7 @@ function applyMenu() {
       openDownloadFolder,
       promptForServerUrl,
       showAbout,
+      checkForUpdates: () => updater && updater.checkManually(),
       toggleSetting,
       getSetting: (key) => config.get(key),
       quit: () => {
@@ -357,6 +361,12 @@ if (!app.requestSingleInstanceLock()) {
     setupTray();
     mainWindow = createWindow();
     loadServer();
+    updater = setupAutoUpdater({
+      appName: 'SUMI',
+      iconPath: ICON_PNG,
+      getWindow: () => mainWindow,
+    });
+    updater.start();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

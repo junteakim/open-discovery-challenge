@@ -11,9 +11,11 @@
   "scripts": {
     "start": "electron .",
     "icon": "node scripts/make-icon.mjs",
-    "build:win": "npm run icon && electron-builder --win nsis portable",
-    "build:win:portable": "npm run icon && electron-builder --win portable",
+    "build:win": "npm run icon && electron-builder --win nsis --publish never",
     "pack:win:dir": "node scripts/pack-win-dir.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@electron/packager": "^18.3.6",
@@ -36,14 +38,16 @@
       "assets/smc-logo.png",
       "package.json"
     ],
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/junteakim/open-discovery-challenge/releases/download/sumi-desktop-latest",
+      "channel": "latest",
+      "useMultipleRangeRequest": false
+    },
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
           "arch": ["x64"]
         }
       ],
@@ -61,9 +65,6 @@
       "uninstallerIcon": "assets/icon.ico",
       "installerLanguages": ["ko-KR", "en-US"],
       "language": "1042"
-    },
-    "portable": {
-      "artifactName": "SUMI-${version}-portable.${ext}"
     }
   }
 }
