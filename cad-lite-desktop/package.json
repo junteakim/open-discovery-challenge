@@ -1,0 +1,52 @@
+{
+  "name": "smc-draftline-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SMC DraftLine (cad-lite) Windows 데스크톱 앱",
+  "author": {
+    "name": "SMC 서울기계"
+  },
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.mjs",
+    "build:win": "npm run icon && electron-builder --win portable",
+    "pack:win:dir": "npm run icon && electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^38.4.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.smc.draftline",
+    "productName": "SMC DraftLine",
+    "copyright": "Copyright © SMC 서울기계",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "app.config.js",
+      "assets/icon.ico",
+      "assets/app-icon.png",
+      "assets/smc-logo.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "portable": {
+      "artifactName": "SMC-DraftLine-${version}-portable.${ext}",
+      "requestExecutionLevel": "user"
+    }
+  }
+}
