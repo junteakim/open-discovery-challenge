@@ -7,7 +7,6 @@ const {
   Menu,
   Notification,
   Tray,
-  clipboard,
   dialog,
   ipcMain,
   nativeImage,
@@ -24,6 +23,7 @@ const ICON_PNG = path.join(__dirname, '..', 'assets', 'smc-icon.png');
 const ERROR_PAGE = path.join(__dirname, 'error.html');
 
 let mainWindow = null;
+let serverUrlWindow = null;
 let tray = null;
 let quitting = false;
 
@@ -181,27 +181,39 @@ function changeZoom(delta) {
   config.set('zoomLevel', next);
 }
 
-async function promptForServerUrl() {
+function promptForServerUrl() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  const current = config.get('serverUrl');
-  const { response } = await dialog.showMessageBox(mainWindow, {
-    type: 'question',
+  if (serverUrlWindow && !serverUrlWindow.isDestroyed()) {
+    serverUrlWindow.focus();
+    return;
+  }
+
+  serverUrlWindow = new BrowserWindow({
+    parent: mainWindow,
+    modal: true,
+    width: 520,
+    height: 230,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
     title: '서버 주소',
-    message: '현재 서버 주소',
-    detail: current,
-    buttons: ['닫기', '주소 복사', '기본 주소로 되돌리기'],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
+    backgroundColor: '#171a21',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
   });
 
-  if (response === 1) {
-    clipboard.writeText(current);
-  } else if (response === 2) {
-    config.set('serverUrl', config.DEFAULT_URL);
-    config.saveNow();
-    loadServer();
-  }
+  serverUrlWindow.setMenu(null);
+  serverUrlWindow.on('closed', () => {
+    serverUrlWindow = null;
+  });
+  serverUrlWindow.loadFile(path.join(__dirname, 'server-url.html')).catch((error) => {
+    console.error('서버 주소 창을 열지 못했습니다:', error);
+  });
 }
 
 function showAbout() {
@@ -368,11 +380,18 @@ setupCertificateHandling();
 
 ipcMain.handle('sumi:get-state', () => ({
   serverUrl: config.get('serverUrl'),
+  defaultUrl: config.DEFAULT_URL,
   version: app.getVersion(),
 }));
 
 ipcMain.handle('sumi:retry', () => {
   loadServer();
+  return true;
+});
+
+ipcMain.handle('sumi:close-dialog', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window && window !== mainWindow) window.close();
   return true;
 });
 

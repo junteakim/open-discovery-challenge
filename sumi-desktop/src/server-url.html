@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src file:" />
+    <title>서버 주소</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 22px;
+        background: #171a21;
+        color: #e8eaf0;
+        font-family: "Malgun Gothic", "맑은 고딕", "Pretendard", system-ui, sans-serif;
+      }
+      h1 { font-size: 15px; margin: 0 0 6px; }
+      p { margin: 0 0 14px; font-size: 12px; color: #9aa3b2; line-height: 1.6; }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 8px;
+        border: 1px solid #272c36;
+        background: #11141a;
+        color: #e8eaf0;
+        font-size: 13px;
+      }
+      .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+      button {
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: #3b82f6;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary { background: transparent; border-color: #272c36; color: #e8eaf0; }
+      .status { margin-top: 10px; font-size: 12px; color: #f0a5a5; min-height: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>SUMI 서버 주소</h1>
+    <p>접속할 서버 주소를 입력하세요. 저장하면 창이 새 주소로 다시 연결됩니다.</p>
+    <input id="server-url" type="text" spellcheck="false" placeholder="https://서버주소:포트/" />
+    <div class="row">
+      <button id="reset" class="secondary" type="button">기본값</button>
+      <button id="cancel" class="secondary" type="button">취소</button>
+      <button id="save" type="button">저장</button>
+    </div>
+    <p class="status" id="status"></p>
+    <script src="server-url.js"></script>
+  </body>
+</html>

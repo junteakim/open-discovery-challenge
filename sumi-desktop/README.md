@@ -57,7 +57,7 @@ npm start -- --url=https://다른서버:9443/     # 위와 동일
 
 ## 설정
 
-메뉴 **설정** 에서 바꿀 수 있고, 값은 아래 파일에 저장됩니다.
+메뉴 **설정 → 서버 주소 확인·변경…** 에서 접속 주소를 직접 입력할 수 있고(`기본값` 버튼으로 초기화), 나머지 항목은 **설정** 메뉴의 체크 항목으로 켜고 끕니다. 값은 아래 파일에 저장됩니다.
 
 - 윈도우: `%APPDATA%\SUMI\settings.json`
 - 리눅스(개발 실행): `~/.config/sumi-desktop/settings.json`
@@ -94,7 +94,9 @@ sumi-desktop/
 │   ├── downloads.js   다운로드 자동 저장·진행률·완료 알림
 │   ├── preload.js     오류 화면 전용 최소 IPC 브리지
 │   ├── error.html     연결 실패 화면
-│   └── error.js       연결 실패 화면 스크립트
+│   ├── error.js       연결 실패 화면 스크립트
+│   ├── server-url.html 서버 주소 입력 대화 창
+│   └── server-url.js  서버 주소 입력 대화 창 스크립트
 ├── assets/            아이콘(.png/.ico), 로고
 └── scripts/           아이콘 생성 및 Wine 없는 패키징 스크립트
 ```

@@ -9,5 +9,6 @@ if (location.protocol === 'file:') {
     getState: () => ipcRenderer.invoke('sumi:get-state'),
     retry: () => ipcRenderer.invoke('sumi:retry'),
     setServerUrl: (value) => ipcRenderer.invoke('sumi:set-server-url', value),
+    closeDialog: () => ipcRenderer.invoke('sumi:close-dialog'),
   });
 }
