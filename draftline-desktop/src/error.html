@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; script-src file:" />
+    <title>연결할 수 없습니다 · SMC DraftLine</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8f9fa;
+        --panel: #ffffff;
+        --line: #dfe3e8;
+        --text: #1f2933;
+        --muted: #616e7c;
+        --accent: #1f6feb;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Malgun Gothic", "맑은 고딕", "Pretendard", system-ui, sans-serif;
+      }
+      .card {
+        width: min(560px, 100%);
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 32px;
+        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+      }
+      .logo { max-width: 180px; height: auto; margin-bottom: 24px; }
+      h1 { font-size: 20px; margin: 0 0 8px; }
+      p { margin: 0 0 8px; color: var(--muted); line-height: 1.6; font-size: 14px; }
+      code {
+        display: block;
+        margin: 16px 0;
+        padding: 12px 14px;
+        background: #f1f3f5;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 12px;
+        color: #344054;
+        word-break: break-all;
+        white-space: pre-wrap;
+      }
+      .row { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
+      input {
+        flex: 1 1 260px;
+        min-width: 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--text);
+        font-size: 14px;
+      }
+      button {
+        padding: 10px 18px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        background: var(--accent);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.secondary { background: #fff; border-color: var(--line); color: var(--text); }
+      button:hover { filter: brightness(0.96); }
+      .status { margin-top: 12px; font-size: 13px; color: var(--muted); min-height: 18px; }
+      ul { margin: 12px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <img class="logo" src="../assets/smc-logo.png" alt="SMC 서울기계" />
+      <h1>DraftLine 서버에 연결하지 못했습니다</h1>
+      <p>네트워크 상태 또는 서버 주소를 확인한 뒤 다시 시도해 주세요. 이미 열어 둔 도면은 이 기기의 로컬 저장소에 남아 있습니다.</p>
+      <code id="detail">-</code>
+      <ul>
+        <li>사내망(또는 VPN)에 연결되어 있는지 확인합니다.</li>
+        <li>서버가 재시작 중이면 잠시 후 다시 시도합니다.</li>
+        <li>주소가 바뀌었다면 아래에 새 주소를 입력합니다.</li>
+      </ul>
+      <div class="row">
+        <input id="server-url" type="text" spellcheck="false" placeholder="http://서버주소:포트/cad-lite/" />
+        <button id="save" class="secondary" type="button">주소 저장</button>
+        <button id="retry" type="button">다시 시도</button>
+      </div>
+      <p class="status" id="status"></p>
+    </main>
+    <script src="error.js"></script>
+  </body>
+</html>
