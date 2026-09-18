@@ -1,0 +1,150 @@
+name: SUMI Desktop (Windows exe)
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["sumi-desktop-v*"]
+    paths:
+      - "sumi-desktop/**"
+      - ".github/workflows/sumi-desktop-windows.yml"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "GitHub Releases에 게시하고 자동 업데이트 채널(sumi-desktop-latest)을 갱신"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sumi-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_DIR: sumi-desktop
+  APP_TITLE: SUMI Desktop
+  TAG_PREFIX: sumi-desktop-v
+  CHANNEL_TAG: sumi-desktop-latest
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: sumi-desktop
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sumi-desktop/package-lock.json
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 버전·게시 여부 결정
+        id: meta
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG_PREFIX}${VERSION}" >> "$GITHUB_OUTPUT"
+
+          PUBLISH=false
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ "$GITHUB_REF_NAME" != "${TAG_PREFIX}${VERSION}" ]]; then
+              echo "::error::태그($GITHUB_REF_NAME)와 package.json 버전(${TAG_PREFIX}${VERSION})이 다릅니다."
+              exit 1
+            fi
+            PUBLISH=true
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "${{ inputs.publish }}" == "true" ]]; then
+            PUBLISH=true
+          fi
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "버전 $VERSION, 게시: $PUBLISH"
+
+      - name: NSIS 설치 파일 + 업데이트 메타데이터 빌드
+        run: npm run build:win
+        env:
+          GH_TOKEN: ""
+
+      - name: 산출물 검증
+        run: |
+          ls -la release
+          SETUP_COUNT=$(ls release/*-setup.exe | wc -l)
+          [[ "$SETUP_COUNT" == "1" ]] || { echo "::error::setup exe가 1개여야 합니다 (현재 $SETUP_COUNT개)"; exit 1; }
+          [[ -f release/latest.yml ]] || { echo "::error::latest.yml이 없습니다"; exit 1; }
+          ls release/*-setup.exe.blockmap >/dev/null || { echo "::error::blockmap이 없습니다"; exit 1; }
+          grep -q "^version: ${{ steps.meta.outputs.version }}$" release/latest.yml || { echo "::error::latest.yml 버전이 package.json과 다릅니다"; exit 1; }
+          cat release/latest.yml
+
+      - name: 빌드 결과 업로드 (아티팩트)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SUMI-windows-setup
+          path: |
+            sumi-desktop/release/*-setup.exe
+            sumi-desktop/release/*.blockmap
+            sumi-desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: GitHub Releases 게시 (버전 릴리스 + 자동 업데이트 채널)
+        if: steps.meta.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          ASSETS=(release/*-setup.exe release/*-setup.exe.blockmap release/latest.yml)
+          SETUP_NAME="$(basename release/*-setup.exe)"
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${SETUP_NAME}"
+
+          NOTES="$(cat <<EOF
+          ${APP_TITLE} v${VERSION} (Windows 설치판)
+
+          - 설치 파일: [${SETUP_NAME}](${DOWNLOAD_URL})
+          - 설치된 앱은 자동 업데이트 채널(\`${CHANNEL_TAG}\`)을 통해 다음 버전으로 자동 갱신됩니다.
+          - 빌드: GitHub Actions run ${GITHUB_RUN_ID} (commit ${GITHUB_SHA::7})
+          EOF
+          )"
+
+          # 1) 버전 릴리스 (태그가 없으면 현재 커밋에 생성)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${ASSETS[@]}" --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" "${ASSETS[@]}" --target "$GITHUB_SHA" \
+              --title "${APP_TITLE} v${VERSION}" --notes "$NOTES"
+          fi
+
+          # 2) 앱별 자동 업데이트 채널: 고정 태그의 릴리스 자산을 최신 버전으로 교체
+          CHANNEL_NOTES="$(cat <<EOF
+          ${APP_TITLE} 자동 업데이트 채널입니다. 설치된 앱이 이 릴리스의 \`latest.yml\`을 조회합니다.
+
+          - 현재 버전: **v${VERSION}** → [${SETUP_NAME}](https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL_TAG}/${SETUP_NAME})
+          - 버전별 릴리스: [${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG})
+          - 이 릴리스는 CI가 자동으로 갱신합니다. 자산을 직접 수정하지 마세요.
+          EOF
+          )"
+          if ! gh release view "$CHANNEL_TAG" >/dev/null 2>&1; then
+            gh release create "$CHANNEL_TAG" --target "$GITHUB_SHA" --latest=false \
+              --title "${APP_TITLE} 자동 업데이트 채널 (항상 최신)" --notes "$CHANNEL_NOTES"
+          fi
+
+          KEEP=" $(for f in "${ASSETS[@]}"; do basename "$f"; done | tr '\n' ' ') "
+          for existing in $(gh release view "$CHANNEL_TAG" --json assets --jq '.assets[].name'); do
+            if [[ "$KEEP" != *" $existing "* ]]; then
+              echo "이전 자산 제거: $existing"
+              gh release delete-asset "$CHANNEL_TAG" "$existing" --yes
+            fi
+          done
+          gh release upload "$CHANNEL_TAG" "${ASSETS[@]}" --clobber
+          gh release edit "$CHANNEL_TAG" --notes "$CHANNEL_NOTES" --latest=false
+
+          echo "게시 완료: $TAG / $CHANNEL_TAG"
+          echo "latest.yml: https://github.com/${GITHUB_REPOSITORY}/releases/download/${CHANNEL_TAG}/latest.yml"

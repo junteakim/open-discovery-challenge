@@ -1,0 +1,75 @@
+{
+  "name": "sumi-desktop",
+  "version": "1.0.1",
+  "private": true,
+  "description": "SUMI (스미) 사내 업무 에이전트 Windows 데스크톱 앱",
+  "author": {
+    "name": "SMC 서울기계"
+  },
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.mjs",
+    "build:win": "npm run icon && electron-builder --win nsis --publish never",
+    "pack:win:dir": "node scripts/pack-win-dir.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^38.4.0",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^2.1.8"
+  },
+  "build": {
+    "appId": "com.smc.sumi",
+    "productName": "SUMI",
+    "copyright": "Copyright © SMC 서울기계",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "src/**/*",
+      "assets/icon.ico",
+      "assets/smc-icon.png",
+      "assets/smc-logo.png",
+      "package.json"
+    ],
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/junteakim/open-discovery-challenge/releases/download/sumi-desktop-latest",
+      "channel": "latest",
+      "useMultipleRangeRequest": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "SUMI-${version}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SUMI",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerLanguages": [
+        "ko-KR",
+        "en-US"
+      ],
+      "language": "1042"
+    }
+  }
+}
