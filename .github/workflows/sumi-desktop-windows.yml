@@ -1,0 +1,42 @@
+name: SUMI Desktop (Windows exe)
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "sumi-desktop/**"
+      - ".github/workflows/sumi-desktop-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: sumi-desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sumi-desktop/package-lock.json
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: Windows 설치 파일 및 포터블 exe 빌드
+        run: npm run build:win
+        env:
+          GH_TOKEN: ""
+
+      - name: 빌드 결과 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: SUMI-windows-exe
+          path: |
+            sumi-desktop/release/*.exe
+            sumi-desktop/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 30
