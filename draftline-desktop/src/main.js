@@ -16,6 +16,7 @@ const appConfig = require('../app.config');
 const config = require('./config');
 const { buildAppMenu, buildContextMenu } = require('./menu');
 const { registerDownloadHandler, openDownloadFolder } = require('./downloads');
+const { setupAutoUpdater } = require('./updater');
 
 const ICON_PNG = path.join(__dirname, '..', 'assets', 'app-icon.png');
 const ERROR_PAGE = path.join(__dirname, 'error.html');
@@ -23,6 +24,7 @@ const PRELOAD = path.join(__dirname, 'preload.js');
 
 let mainWindow = null;
 let serverUrlWindow = null;
+let updater = null;
 
 function serverOrigin() {
   try {
@@ -257,6 +259,7 @@ function showAbout() {
       `Electron: ${process.versions.electron}`,
       `Chromium: ${process.versions.chrome}`,
       `설정 파일: ${config.configPath()}`,
+      `업데이트 채널: ${updater ? updater.feedUrl() : '-'}`,
     ].join('\n'),
     buttons: ['확인'],
     noLink: true,
@@ -278,6 +281,7 @@ function applyMenu() {
       openDownloadFolder,
       promptForServerUrl,
       showAbout,
+      checkForUpdates: () => updater && updater.checkManually(),
       toggleSetting,
       getSetting: (key) => config.get(key),
       quit: () => app.quit(),
@@ -335,6 +339,12 @@ if (!app.requestSingleInstanceLock()) {
     applyMenu();
     mainWindow = createWindow();
     loadServer();
+    updater = setupAutoUpdater({
+      appName: appConfig.displayName,
+      iconPath: ICON_PNG,
+      getWindow: () => mainWindow,
+    });
+    updater.start();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

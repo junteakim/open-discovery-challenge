@@ -11,8 +11,11 @@
   "scripts": {
     "start": "electron .",
     "icon": "node scripts/make-icon.mjs",
-    "build:win": "npm run icon && electron-builder --win portable",
+    "build:win": "npm run icon && electron-builder --win nsis --publish never",
     "pack:win:dir": "npm run icon && electron-builder --win --dir"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "electron": "^38.4.0",
@@ -35,18 +38,33 @@
       "assets/smc-logo.png",
       "package.json"
     ],
+    "publish": {
+      "provider": "generic",
+      "url": "https://github.com/junteakim/open-discovery-challenge/releases/download/draftline-desktop-latest",
+      "channel": "latest",
+      "useMultipleRangeRequest": false
+    },
     "win": {
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": ["x64"]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "assets/icon.ico",
+      "artifactName": "SMC-DraftLine-${version}-setup.${ext}"
     },
-    "portable": {
-      "artifactName": "SMC-DraftLine-${version}-portable.${ext}",
-      "requestExecutionLevel": "user"
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SMC DraftLine",
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerLanguages": ["ko-KR", "en-US"],
+      "language": "1042"
     }
   }
 }
