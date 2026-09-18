@@ -1,6 +1,6 @@
 {
   "name": "sumi-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "SUMI (스미) 사내 업무 에이전트 Windows 데스크톱 앱",
   "author": {
@@ -48,7 +48,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico",
@@ -63,7 +65,10 @@
       "shortcutName": "SUMI",
       "installerIcon": "assets/icon.ico",
       "uninstallerIcon": "assets/icon.ico",
-      "installerLanguages": ["ko-KR", "en-US"],
+      "installerLanguages": [
+        "ko-KR",
+        "en-US"
+      ],
       "language": "1042"
     }
   }
